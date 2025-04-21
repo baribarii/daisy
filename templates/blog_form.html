@@ -1,0 +1,39 @@
+{% extends 'layout.html' %}
+
+{% block title %}블로그 주소 입력{% endblock %}
+
+{% block content %}
+<div class="container mt-5">
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h3 class="mb-0">블로그 분석 시작하기</h3>
+                </div>
+                <div class="card-body">
+                    <div class="alert alert-success mb-4">
+                        <h5>{{ user_name }}님, 환영합니다!</h5>
+                        <p>네이버 계정으로 로그인했습니다. 이제 분석할 블로그 주소를 입력해주세요.</p>
+                    </div>
+                    
+                    <form action="{{ url_for('oauth_submit_blog') }}" method="post">
+                        <div class="mb-3">
+                            <label for="blog_url" class="form-label">네이버 블로그 URL</label>
+                            <input type="text" class="form-control" id="blog_url" name="blog_url" placeholder="https://blog.naver.com/your-blog-id" required>
+                            <div class="form-text">분석하고자 하는 네이버 블로그 주소를 입력하세요.</div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <p class="small text-muted">OAuth 로그인 덕분에 쿠키 값을 직접 입력할 필요가 없습니다. 네이버 계정으로 블로그에 접근합니다.</p>
+                        </div>
+                        
+                        <div class="d-grid gap-2">
+                            <button type="submit" class="btn btn-primary">블로그 분석 시작</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

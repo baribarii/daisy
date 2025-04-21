@@ -5,6 +5,7 @@ from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import DeclarativeBase
 from werkzeug.middleware.proxy_fix import ProxyFix
 import time
+import urllib.parse
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
@@ -37,10 +38,154 @@ with app.app_context():
 
 from scraper import scrape_naver_blog
 from analyzer import analyze_blog_content
+from oauth_handler import get_authorization_url, get_token_from_code, get_user_info
+from oauth_scraper import scrape_blog_with_oauth
 
 @app.route('/')
 def index():
     return render_template('index.html')
+
+@app.route('/oauth/login')
+def oauth_login():
+    """
+    네이버 OAuth 로그인 시작
+    """
+    try:
+        # 호스트 URL 가져오기 (Replit에서는 환경변수나 request.host_url 사용)
+        host_url = request.host_url.rstrip('/')
+        callback_url = f"{host_url}/oauth/callback"
+        
+        # 인증 URL 생성
+        auth_url, state = get_authorization_url(callback_url)
+        
+        # 상태 저장
+        session['oauth_state'] = state
+        
+        # 인증 페이지로 리다이렉트
+        return redirect(auth_url)
+    except Exception as e:
+        logger.error(f"OAuth 로그인 오류: {str(e)}")
+        flash('로그인 과정에서 오류가 발생했습니다.', 'danger')
+        return redirect(url_for('index'))
+
+@app.route('/oauth/callback')
+def oauth_callback():
+    """
+    네이버 OAuth 콜백 처리
+    """
+    try:
+        # 인증 코드 및 상태 가져오기
+        code = request.args.get('code')
+        state = request.args.get('state')
+        
+        # 상태 확인
+        stored_state = session.pop('oauth_state', None)
+        if stored_state != state:
+            flash('인증 과정에서 오류가 발생했습니다.', 'danger')
+            return redirect(url_for('index'))
+        
+        # 액세스 토큰 발급
+        token = get_token_from_code(code, state)
+        if not token:
+            flash('토큰 발급에 실패했습니다.', 'danger')
+            return redirect(url_for('index'))
+        
+        # 사용자 정보 가져오기
+        user_info = get_user_info(token)
+        if not user_info:
+            flash('사용자 정보를 가져오지 못했습니다.', 'danger')
+            return redirect(url_for('index'))
+        
+        # 세션에 토큰 및 사용자 정보 저장
+        session['access_token'] = token.get('access_token')
+        session['refresh_token'] = token.get('refresh_token')
+        session['user_id'] = user_info.get('id')
+        session['user_name'] = user_info.get('name')
+        session['user_email'] = user_info.get('email')
+        
+        # 블로그 수집 페이지로 리다이렉트
+        flash('네이버 계정으로 로그인했습니다. 이제 블로그 주소를 입력하세요.', 'success')
+        return redirect(url_for('blog_form'))
+    except Exception as e:
+        logger.error(f"OAuth 콜백 오류: {str(e)}")
+        flash('로그인 콜백 처리 중 오류가 발생했습니다.', 'danger')
+        return redirect(url_for('index'))
+
+@app.route('/blog/form')
+def blog_form():
+    """
+    블로그 URL 입력 폼
+    """
+    # 로그인 여부 확인
+    if 'access_token' not in session:
+        flash('먼저 네이버 계정으로 로그인해주세요.', 'warning')
+        return redirect(url_for('index'))
+    
+    return render_template('blog_form.html', user_name=session.get('user_name'))
+
+@app.route('/blog/submit', methods=['POST'])
+def oauth_submit_blog():
+    """
+    OAuth 토큰을 사용하여 블로그 제출 처리
+    """
+    blog_url = request.form.get('blog_url', '')
+    
+    if not blog_url:
+        flash('블로그 URL을 입력해주세요.', 'danger')
+        return redirect(url_for('blog_form'))
+    
+    # 블로그 URL 검증
+    if 'blog.naver.com' not in blog_url:
+        flash('네이버 블로그 URL을 입력해주세요.', 'danger')
+        return redirect(url_for('blog_form'))
+    
+    # 로그인 여부 확인
+    if 'access_token' not in session:
+        flash('세션이 만료되었습니다. 다시 로그인해주세요.', 'warning')
+        return redirect(url_for('oauth_login'))
+    
+    try:
+        # 스크래핑 시작
+        flash('블로그 콘텐츠 수집을 시작합니다...', 'info')
+        
+        # 데이터베이스에 블로그 등록
+        blog = Blog(url=blog_url)
+        db.session.add(blog)
+        db.session.commit()
+        
+        # 세션에 blog_id 저장
+        session['blog_id'] = blog.id
+        
+        # OAuth 토큰을 사용하여 스크래핑
+        posts = scrape_blog_with_oauth(blog_url, session['access_token'])
+        
+        if not posts:
+            flash('블로그에서 포스트를 찾을 수 없습니다.', 'danger')
+            return redirect(url_for('blog_form'))
+        
+        # 로그 기록
+        logger.debug(f"성공적으로 {len(posts)}개의 포스트를 추출했습니다.")
+        
+        # 데이터베이스에 포스트 저장
+        for post in posts:
+            blog_post = BlogPost(
+                blog_id=blog.id,
+                title=post.get('title', ''),
+                content=post.get('content', ''),
+                date=post.get('date', ''),
+                is_private=post.get('is_private', False)
+            )
+            db.session.add(blog_post)
+        
+        db.session.commit()
+        
+        # 분석 페이지로 리다이렉트
+        return redirect(url_for('analyze_blog', blog_id=blog.id))
+    
+    except Exception as e:
+        logger.error(f"블로그 제출 오류: {str(e)}")
+        flash(f'오류가 발생했습니다: {str(e)}', 'danger')
+        return redirect(url_for('blog_form'))
 
 @app.route('/submit_blog', methods=['POST'])
 def submit_blog():
