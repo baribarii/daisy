@@ -68,12 +68,20 @@ def submit_blog():
         # Store blog_id in session for tracking
         session['blog_id'] = blog.id
         
-        # Start scraping
-        posts = scrape_naver_blog(blog_url, cookie_value)
+        # Extract blog_id from URL
+        from scraper import extract_blog_id
+        blog_id = extract_blog_id(blog_url)
+        
+        # Use Playwright to fetch blog posts
+        from utils_browser import fetch_all_posts_with_playwright
+        posts = fetch_all_posts_with_playwright(blog_id, cookie_value)
         
         if not posts:
             flash('No posts found or unable to access the blog', 'danger')
             return redirect(url_for('index'))
+        
+        # Log number of posts found
+        logger.debug(f"Successfully extracted {len(posts)} posts")
         
         # Save posts to database
         for post in posts:
