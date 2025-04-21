@@ -172,23 +172,86 @@ class NaverOAuthScraper:
                 
                 soup = BeautifulSoup(response.text, 'html.parser')
                 
-                # 1. logNo 파라미터가 있는 링크 찾기
-                for link in soup.select('a[href*="logNo="]'):
+                # 더 많은 로깅 추가
+                logger.debug(f"HTML 내용: {soup.prettify()[:500]}...")  # 처음 500자만 로깅
+                
+                # 모든 링크 로깅
+                all_links = soup.select('a')
+                logger.debug(f"페이지에서 발견된 링크 수: {len(all_links)}")
+                for i, link in enumerate(all_links[:10]):  # 처음 10개 링크만 로깅
+                    logger.debug(f"링크 {i}: {link.get('href', 'No href')}")
+                
+                # 1. logNo 파라미터가 있는 링크 찾기 - 다양한 방식으로 시도
+                for link in soup.select('a'):
                     href = link.get('href', '')
+                    if not href:
+                        continue
+                    
+                    # 직접 문자열 파싱으로 logNo 추출
                     if 'logNo=' in href:
-                        logno = parse_qs(urlparse(href).query).get('logNo', [None])[0]
-                        if logno:
-                            lognos.add(logno)
+                        try:
+                            logno = href.split('logNo=')[1].split('&')[0]
+                            if logno and logno.isdigit():
+                                lognos.add(logno)
+                                logger.debug(f"Found logNo: {logno}")
+                        except Exception as e:
+                            logger.error(f"Error parsing logNo: {str(e)}")
                 
                 # 2. 현대 네이버 블로그 형식 (/blogId/logNo)
-                for link in soup.select(f'a[href*="/{blog_id}/"]'):
+                for link in soup.select('a'):
                     href = link.get('href', '')
+                    if not href:
+                        continue
+                    
+                    # 블로그 포스트 URL 패턴 확인
                     if f'/{blog_id}/' in href:
-                        path = urlparse(href).path
-                        parts = path.split(f'/{blog_id}/')[1].split('/')
-                        for part in parts:
-                            if part.isdigit():
-                                lognos.add(part)
+                        try:
+                            parts = href.split(f'/{blog_id}/')[1].split('?')[0].split('/')
+                            for part in parts:
+                                if part and part.isdigit():
+                                    lognos.add(part)
+                                    logger.debug(f"Found post ID: {part}")
+                        except Exception as e:
+                            logger.error(f"Error parsing blog URL: {str(e)}")
+                
+                # 3. 세 번째 방법: 정규식으로 모든 텍스트에서 포스트 ID 찾기
+                import re
+                html_text = str(soup)
+                # logNo 패턴
+                logno_pattern = re.compile(r'logNo=(\d+)')
+                for match in logno_pattern.finditer(html_text):
+                    logno = match.group(1)
+                    if logno:
+                        lognos.add(logno)
+                        logger.debug(f"Found logNo via regex: {logno}")
+                
+                # 블로그 포스트 ID 패턴
+                postid_pattern = re.compile(r'post_id\s*:\s*[\'"]?(\d+)[\'"]?')
+                for match in postid_pattern.finditer(html_text):
+                    logno = match.group(1)
+                    if logno:
+                        lognos.add(logno)
+                        logger.debug(f"Found post_id via regex: {logno}")
+                
+                # 4. 모바일 버전 URL 시도
+                try:
+                    mobile_url = f"https://m.blog.naver.com/{blog_id}"
+                    logger.debug(f"Trying mobile URL: {mobile_url}")
+                    mobile_response = self.session.get(mobile_url)
+                    if mobile_response.status_code == 200:
+                        mobile_soup = BeautifulSoup(mobile_response.text, 'html.parser')
+                        for link in mobile_soup.select('a'):
+                            href = link.get('href', '')
+                            if 'logNo=' in href:
+                                try:
+                                    logno = href.split('logNo=')[1].split('&')[0]
+                                    if logno and logno.isdigit():
+                                        lognos.add(logno)
+                                        logger.debug(f"Found logNo from mobile: {logno}")
+                                except Exception as e:
+                                    logger.error(f"Error parsing mobile logNo: {str(e)}")
+                except Exception as e:
+                    logger.error(f"Error accessing mobile version: {str(e)}")
                 
                 # 다음 페이지가 없으면 중단
                 if not soup.select('.page_next') and page > 1:
