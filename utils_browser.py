@@ -25,8 +25,8 @@ def fetch_all_posts_with_playwright(blog_id: str, cookie_str: str):
     
     try:
         with sync_playwright() as p:
-            # Chromium 브라우저 실행 (headless 모드)
-            browser = p.chromium.launch(headless=True)
+            # Chromium 브라우저 실행 (headless=False 모드로 시도)
+            browser = p.chromium.launch(headless=False)
             context = browser.new_context(
                 viewport={"width": 1280, "height": 800},
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"

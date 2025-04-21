@@ -68,13 +68,23 @@ def submit_blog():
         # Store blog_id in session for tracking
         session['blog_id'] = blog.id
         
-        # Extract blog_id from URL
-        from scraper import extract_blog_id
-        blog_id = extract_blog_id(blog_url)
-        
-        # Use Playwright to fetch blog posts
-        from utils_browser import fetch_all_posts_with_playwright
-        posts = fetch_all_posts_with_playwright(blog_id, cookie_value)
+        # 여러 스크래핑 방법 시도
+        try:
+            # 1. 먼저 원래 스크래퍼 시도
+            from scraper import scrape_naver_blog
+            logger.debug("Trying original scraper...")
+            posts = scrape_naver_blog(blog_url, cookie_value)
+        except Exception as e:
+            logger.warning(f"Original scraper failed: {str(e)}")
+            
+            # 2. 대체 스크래퍼 시도
+            try:
+                logger.debug("Trying fallback scraper...")
+                from fallback_scraper import scrape_naver_blog_with_fallback
+                posts = scrape_naver_blog_with_fallback(blog_url, cookie_value)
+            except Exception as e2:
+                logger.error(f"Fallback scraper also failed: {str(e2)}")
+                raise Exception(f"Failed to extract any posts from the blog. Please check the blog URL and cookie value.")
         
         if not posts:
             flash('No posts found or unable to access the blog', 'danger')
