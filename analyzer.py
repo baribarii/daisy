@@ -113,6 +113,9 @@ def analyze_blog_content(content):
         7. Advice: Provide specific, actionable advice for personal growth in each area.
         
         For each category, please provide detailed analysis with specific examples from the content.
+        When referencing specific examples, please include the post title so I can trace back to the original source.
+        For example, write "In your post titled 'My Trip to Paris', you showed..." when referring to examples.
+        
         Format your response as a JSON object with these categories as keys, each containing a detailed
         string of analysis.
         

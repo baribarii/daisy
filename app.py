@@ -329,7 +329,36 @@ def view_report(report_id):
     # Get the blog
     blog = Blog.query.get_or_404(report.blog_id)
     
-    return render_template('report.html', report=report, blog=blog)
+    # Get the blog posts (최대 10개만 표시)
+    posts = BlogPost.query.filter_by(blog_id=report.blog_id).order_by(BlogPost.date.desc()).limit(10).all()
+    
+    # 각 포스트 컨텐츠 중 일부만 발췌 (미리보기용)
+    for post in posts:
+        # 본문이 길면 앞부분 200자만 표시하고 '...' 추가
+        if len(post.content) > 200:
+            post.preview = post.content[:200] + '...'
+        else:
+            post.preview = post.content
+        
+        # 네이버 블로그 URL 형식으로 포스트 URL 구성
+        # 블로그 URL에서 ID 추출
+        blog_id = blog.url.split('/')[-1]  # URL에서 블로그 ID 추출
+        if '?' in blog_id:  # 쿼리 파라미터가 있으면 제거
+            blog_id = blog_id.split('?')[0]
+        # 네이버 블로그 URL은 logNo 또는 id 파라미터를 사용합니다
+        # 포스트의 ID는 데이터베이스 ID가 아니라 네이버 블로그에서의 실제 ID를 사용해야 함
+        # 하지만 현재 저장된 ID는 DB ID이므로 임시로 사용
+        # import re에서 logNo 추출 패턴을 사용할 수 있음
+        import re
+        logno_match = re.search(r'logNo=(\d+)', post.content)
+        if logno_match:
+            logno = logno_match.group(1)
+            post.url = f"https://blog.naver.com/{blog_id}/{logno}"
+        else:
+            # 로그번호를 찾을 수 없는 경우 임시로 DB ID 사용
+            post.url = f"https://blog.naver.com/{blog_id}?Redirect=Log&logNo={post.id}"
+    
+    return render_template('report.html', report=report, blog=blog, posts=posts)
 
 @app.route('/status/<int:blog_id>')
 def status(blog_id):
