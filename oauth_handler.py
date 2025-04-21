@@ -9,7 +9,8 @@ logger = logging.getLogger(__name__)
 # 네이버 OAuth 설정
 NAVER_CLIENT_ID = os.environ.get('NAVER_CLIENT_ID')
 NAVER_CLIENT_SECRET = os.environ.get('NAVER_CLIENT_SECRET')
-NAVER_REDIRECT_URI = 'https://localhost:5000/oauth/callback'  # Replit에서는 적절히 수정 필요
+# Replit에서는 동적으로 설정됨
+NAVER_REDIRECT_URI = None
 
 # OAuth 관련 URL
 NAVER_AUTH_URL = 'https://nid.naver.com/oauth2.0/authorize'
