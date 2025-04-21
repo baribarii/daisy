@@ -1,0 +1,199 @@
+{% extends 'layout.html' %}
+
+{% block head %}
+<!-- Charts.js script -->
+<script src="{{ url_for('static', filename='js/charts.js') }}"></script>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1 class="mb-0">나 분석 보고서</h1>
+            <a href="{{ url_for('index') }}" class="btn btn-outline-secondary">
+                <i class="fas fa-arrow-left me-1"></i> 홈으로
+            </a>
+        </div>
+        
+        <div class="alert alert-info">
+            <i class="fas fa-info-circle me-2"></i>
+            이 보고서는 <strong>{{ blog.url }}</strong>의 글 내용을 분석하여 생성되었습니다.
+            <p class="report-date mt-2 mb-0">
+                생성일: {{ report.created_at }}
+            </p>
+        </div>
+        
+        <!-- Summary Cards -->
+        <div class="row mb-4">
+            <div class="col-md-4">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <i class="fas fa-brain fa-3x mb-3 text-primary"></i>
+                        <h5 class="card-title">특성 분석</h5>
+                        <p class="card-text">당신의 행동 패턴과 특성</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <i class="fas fa-balance-scale fa-3x mb-3 text-warning"></i>
+                        <h5 class="card-title">강점과 약점</h5>
+                        <p class="card-text">당신의 장점과 개선점</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <i class="fas fa-lightbulb fa-3x mb-3 text-success"></i>
+                        <h5 class="card-title">맞춤 조언</h5>
+                        <p class="card-text">성장을 위한 실용적 제안</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Charts -->
+        <div class="row mb-4">
+            <!-- Traits Radar Chart -->
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h4 class="mb-0">특성 분석 차트</h4>
+                    </div>
+                    <div class="card-body">
+                        <div id="traits-chart" class="chart-container">
+                            <canvas id="traits-radar-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Strengths vs Weaknesses Chart -->
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h4 class="mb-0">강점과 개선점 비교</h4>
+                    </div>
+                    <div class="card-body">
+                        <div id="strengths-weaknesses-chart" class="chart-container">
+                            <canvas id="strengths-weaknesses-bar-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Characteristics Section -->
+        <div class="report-section">
+            <div class="d-flex justify-content-between align-items-center">
+                <h3><i class="fas fa-fingerprint me-2"></i> 성격 특성</h3>
+                <button class="btn btn-sm btn-outline-secondary copy-btn" data-text-id="characteristics-text">
+                    <i class="fas fa-copy me-1"></i> 복사
+                </button>
+            </div>
+            <div id="characteristics-text">
+                {{ report.characteristics|safe|nl2br }}
+            </div>
+        </div>
+        
+        <!-- Strengths Section -->
+        <div class="report-section">
+            <div class="d-flex justify-content-between align-items-center">
+                <h3><i class="fas fa-award me-2"></i> 강점</h3>
+                <button class="btn btn-sm btn-outline-secondary copy-btn" data-text-id="strengths-text">
+                    <i class="fas fa-copy me-1"></i> 복사
+                </button>
+            </div>
+            <div id="strengths-text">
+                {{ report.strengths|safe|nl2br }}
+            </div>
+        </div>
+        
+        <!-- Weaknesses Section -->
+        <div class="report-section">
+            <div class="d-flex justify-content-between align-items-center">
+                <h3><i class="fas fa-exclamation-triangle me-2"></i> 개선점</h3>
+                <button class="btn btn-sm btn-outline-secondary copy-btn" data-text-id="weaknesses-text">
+                    <i class="fas fa-copy me-1"></i> 복사
+                </button>
+            </div>
+            <div id="weaknesses-text">
+                {{ report.weaknesses|safe|nl2br }}
+            </div>
+        </div>
+        
+        <!-- Thinking Patterns Section -->
+        <div class="report-section">
+            <div class="d-flex justify-content-between align-items-center">
+                <h3><i class="fas fa-brain me-2"></i> 사고 패턴</h3>
+                <button class="btn btn-sm btn-outline-secondary copy-btn" data-text-id="thinking-patterns-text">
+                    <i class="fas fa-copy me-1"></i> 복사
+                </button>
+            </div>
+            <div id="thinking-patterns-text">
+                {{ report.thinking_patterns|safe|nl2br }}
+            </div>
+        </div>
+        
+        <!-- Decision Making Section -->
+        <div class="report-section">
+            <div class="d-flex justify-content-between align-items-center">
+                <h3><i class="fas fa-balance-scale me-2"></i> 의사결정 방식</h3>
+                <button class="btn btn-sm btn-outline-secondary copy-btn" data-text-id="decision-making-text">
+                    <i class="fas fa-copy me-1"></i> 복사
+                </button>
+            </div>
+            <div id="decision-making-text">
+                {{ report.decision_making|safe|nl2br }}
+            </div>
+        </div>
+        
+        <!-- Unconscious Biases Section -->
+        <div class="report-section">
+            <div class="d-flex justify-content-between align-items-center">
+                <h3><i class="fas fa-eye-slash me-2"></i> 무의식적 편향</h3>
+                <button class="btn btn-sm btn-outline-secondary copy-btn" data-text-id="unconscious-biases-text">
+                    <i class="fas fa-copy me-1"></i> 복사
+                </button>
+            </div>
+            <div id="unconscious-biases-text">
+                {{ report.unconscious_biases|safe|nl2br }}
+            </div>
+        </div>
+        
+        <!-- Advice Section -->
+        <div class="report-section">
+            <div class="d-flex justify-content-between align-items-center">
+                <h3><i class="fas fa-lightbulb me-2"></i> 맞춤 조언</h3>
+                <button class="btn btn-sm btn-outline-secondary copy-btn" data-text-id="advice-text">
+                    <i class="fas fa-copy me-1"></i> 복사
+                </button>
+            </div>
+            <div id="advice-text">
+                {{ report.advice|safe|nl2br }}
+            </div>
+        </div>
+        
+        <!-- Action Button -->
+        <div class="text-center mt-4 mb-5">
+            <a href="{{ url_for('index') }}" class="btn btn-lg btn-primary">
+                <i class="fas fa-redo me-2"></i> 새 블로그 분석하기
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Template filter for nl2br (newlines to <br>)
+    document.addEventListener('DOMContentLoaded', function() {
+        const textElements = document.querySelectorAll('[id$="-text"]');
+        textElements.forEach(element => {
+            element.innerHTML = element.innerHTML.replace(/\n/g, '<br>');
+        });
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,27 @@
+{% extends 'layout.html' %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8 text-center">
+        <div class="mt-5 mb-5">
+            <i class="fas fa-exclamation-circle text-danger" style="font-size: 5rem;"></i>
+            <h1 class="mt-4">오류가 발생했습니다</h1>
+            <p class="lead">{{ error }}</p>
+            
+            <div class="alert alert-secondary mt-4">
+                <p>다음 방법을 시도해보세요:</p>
+                <ul class="text-start">
+                    <li>페이지를 새로고침합니다</li>
+                    <li>올바른 블로그 URL과 쿠키값을 입력했는지 확인합니다</li>
+                    <li>네이버에 다시 로그인한 후 새로운 쿠키값을 가져옵니다</li>
+                    <li>잠시 후 다시 시도합니다</li>
+                </ul>
+            </div>
+            
+            <a href="{{ url_for('index') }}" class="btn btn-primary btn-lg mt-3">
+                <i class="fas fa-home me-2"></i> 홈으로 돌아가기
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}

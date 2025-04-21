@@ -1,0 +1,100 @@
+/* Custom styles for Daisy application */
+
+/* Add some spacing to the main container */
+.main-container {
+    padding-top: 2rem;
+    padding-bottom: 2rem;
+}
+
+/* Style for the blog form card */
+.blog-form-card {
+    border-radius: 10px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    transition: transform 0.3s ease;
+}
+
+.blog-form-card:hover {
+    transform: translateY(-5px);
+}
+
+/* Style for report sections */
+.report-section {
+    margin-bottom: 2rem;
+    padding: 1.5rem;
+    border-radius: 8px;
+    background-color: var(--bs-dark);
+}
+
+.report-section h3 {
+    color: var(--bs-info);
+    margin-bottom: 1rem;
+    border-bottom: 1px solid var(--bs-secondary);
+    padding-bottom: 0.5rem;
+}
+
+/* Loading spinner */
+.loading-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    margin: 2rem 0;
+}
+
+.loading-spinner {
+    width: 3rem;
+    height: 3rem;
+    margin-bottom: 1rem;
+}
+
+/* Advice section styling */
+.advice-item {
+    background-color: rgba(13, 110, 253, 0.1);
+    border-left: 4px solid var(--bs-primary);
+    padding: 1rem;
+    margin-bottom: 1rem;
+    border-radius: 0 8px 8px 0;
+}
+
+/* Progress bar for analysis */
+.progress {
+    height: 1.5rem;
+    margin: 1rem 0;
+}
+
+/* Charts container */
+.chart-container {
+    position: relative;
+    margin: 1rem 0;
+    height: 300px;
+}
+
+/* Form input focus */
+.form-control:focus, .form-select:focus {
+    border-color: var(--bs-info);
+    box-shadow: 0 0 0 0.25rem rgba(13, 202, 240, 0.25);
+}
+
+/* Cookie info tooltip */
+.cookie-info {
+    cursor: pointer;
+    margin-left: 0.5rem;
+}
+
+/* Report date info */
+.report-date {
+    font-size: 0.9rem;
+    color: var(--bs-secondary);
+    margin-bottom: 1rem;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .report-section {
+        padding: 1rem;
+    }
+    
+    .chart-container {
+        height: 250px;
+    }
+}

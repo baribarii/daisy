@@ -1,0 +1,109 @@
+{% extends 'layout.html' %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="text-center mb-4">
+            <h1 class="display-4 mb-3">데이지</h1>
+            <p class="lead">당신의 네이버 블로그 글을 분석하여 자아에 대한 심층적인 통찰을 제공합니다</p>
+        </div>
+        
+        <div id="form-container" class="card blog-form-card mb-4">
+            <div class="card-header bg-dark">
+                <h3 class="card-title mb-0">블로그 분석 시작하기</h3>
+            </div>
+            <div class="card-body">
+                <form id="blog-form" action="{{ url_for('submit_blog') }}" method="post">
+                    <div class="mb-3">
+                        <label for="blog_url" class="form-label">네이버 블로그 주소</label>
+                        <input type="url" class="form-control" id="blog_url" name="blog_url" required 
+                               placeholder="https://blog.naver.com/your-blog-id">
+                        <div class="form-text">분석할 네이버 블로그의 URL을 입력하세요.</div>
+                    </div>
+                    
+                    <div class="mb-4">
+                        <label for="cookie_value" class="form-label">
+                            네이버 쿠키 값
+                            <span id="cookie-info-btn" class="badge bg-info cookie-info" 
+                                  data-bs-toggle="tooltip" data-bs-placement="top" 
+                                  title="쿠키 값을 가져오는 방법 보기">
+                                <i class="fas fa-info-circle"></i>
+                            </span>
+                        </label>
+                        <textarea class="form-control" id="cookie_value" name="cookie_value" rows="3" required
+                                  placeholder="NID_AUT=...; NID_SES=..."></textarea>
+                        <div class="form-text">
+                            비공개 글을 포함한 모든 콘텐츠를 분석하기 위해 필요합니다. 
+                            쿠키 값은 저장되지 않고 블로그 데이터 수집에만 사용됩니다.
+                        </div>
+                    </div>
+                    
+                    <div class="alert alert-info" role="alert">
+                        <i class="fas fa-info-circle me-2"></i>
+                        블로그 글이 많을수록 더 정확한 분석이 가능합니다. 분석은 약 1-3분 소요됩니다.
+                    </div>
+                    
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary btn-lg">
+                            <i class="fas fa-chart-line me-2"></i> 분석 시작하기
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+        <!-- Loading state (hidden by default) -->
+        <div id="loading-container" class="d-none">
+            <div id="status-container" class="loading-container">
+                <div class="spinner-border text-primary loading-spinner" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <h4>블로그 데이터 수집 중...</h4>
+                <p>총 <span id="post-count">0</span>개의 게시글 처리됨</p>
+                
+                <div class="progress w-100 mt-3">
+                    <div id="loading-progress" class="progress-bar progress-bar-striped progress-bar-animated" 
+                         role="progressbar" aria-valuenow="10" aria-valuemin="0" aria-valuemax="100" style="width: 10%"></div>
+                </div>
+                
+                <div class="mt-3 text-muted">
+                    <small>
+                        <i class="fas fa-exclamation-circle me-1"></i>
+                        이 과정은 블로그 글의 양에 따라 몇 분이 소요될 수 있습니다. 페이지를 닫지 마세요.
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-5">
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-body text-center">
+                <i class="fas fa-search fa-3x mb-3 text-primary"></i>
+                <h4 class="card-title">심층 분석</h4>
+                <p class="card-text">당신이 작성한 블로그 글을 바탕으로 성격 특성, 사고 방식, 강점과 약점을 상세히 분석합니다.</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-body text-center">
+                <i class="fas fa-lightbulb fa-3x mb-3 text-warning"></i>
+                <h4 class="card-title">자기 인식</h4>
+                <p class="card-text">글 속에 드러난 무의식적인 사고패턴과 편향을 발견하여 자기 자신을 더 깊이 이해할 수 있습니다.</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-body text-center">
+                <i class="fas fa-arrow-up fa-3x mb-3 text-success"></i>
+                <h4 class="card-title">맞춤 조언</h4>
+                <p class="card-text">분석 결과를 바탕으로 개인적 성장을 위한 실용적이고 구체적인 조언을 제공합니다.</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
