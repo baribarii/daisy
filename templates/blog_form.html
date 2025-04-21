@@ -28,7 +28,24 @@
                         </div>
                         
                         <div class="d-grid gap-2">
-                            <button type="submit" class="btn btn-primary">블로그 분석 시작</button>
+                            <button type="submit" id="analyze-btn" class="btn btn-primary">블로그 분석 시작</button>
+                        </div>
+                        
+                        <!-- 진행 상황 표시 (초기에는 숨김) -->
+                        <div id="progress-container" class="text-center mt-4 d-none">
+                            <div class="progress-wrapper position-relative mx-auto" style="width: 150px; height: 150px;">
+                                <div class="progress-circle">
+                                    <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                                        <circle class="progress-circle-bg" cx="50" cy="50" r="45" />
+                                        <circle class="progress-circle-value" cx="50" cy="50" r="45" stroke-dasharray="283" stroke-dashoffset="283" />
+                                    </svg>
+                                </div>
+                                <div class="progress-value position-absolute top-50 start-50 translate-middle">
+                                    <h3 id="progress-percentage" class="m-0">0%</h3>
+                                </div>
+                            </div>
+                            <h5 class="mt-3">블로그 콘텐츠 수집 및 분석 중...</h5>
+                            <p class="text-muted small" id="progress-status">포스트를 수집하고 있습니다</p>
                         </div>
                     </form>
                 </div>

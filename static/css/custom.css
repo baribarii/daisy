@@ -62,6 +62,37 @@
     margin: 1rem 0;
 }
 
+/* Circular progress bar */
+.progress-wrapper {
+    position: relative;
+}
+
+.progress-circle {
+    width: 100%;
+    height: 100%;
+}
+
+.progress-circle-bg {
+    fill: none;
+    stroke: rgba(var(--bs-primary-rgb), 0.2);
+    stroke-width: 8;
+}
+
+.progress-circle-value {
+    fill: none;
+    stroke: var(--bs-primary);
+    stroke-width: 8;
+    stroke-linecap: round;
+    transform: rotate(-90deg);
+    transform-origin: center;
+    transition: stroke-dashoffset 0.5s ease;
+}
+
+.progress-value {
+    width: 100%;
+    text-align: center;
+}
+
 /* Charts container */
 .chart-container {
     position: relative;
