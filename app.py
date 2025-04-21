@@ -6,6 +6,8 @@ from sqlalchemy.orm import DeclarativeBase
 from werkzeug.middleware.proxy_fix import ProxyFix
 import time
 import urllib.parse
+import markupsafe
+import re
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
@@ -30,6 +32,17 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 # initialize the app with the extension
 db.init_app(app)
+
+# nl2br 필터 추가
+@app.template_filter('nl2br')
+def nl2br_filter(text):
+    if not text:
+        return ''
+    # 개행 문자를 <br> 태그로 변경
+    text = str(text)  # 문자열로 변환
+    text = markupsafe.escape(text)  # HTML 이스케이프
+    text = re.sub(r'\n', '<br>', text)
+    return markupsafe.Markup(text)
 
 with app.app_context():
     # Import the models here to create their tables
