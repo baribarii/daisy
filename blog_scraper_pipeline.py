@@ -4,7 +4,7 @@ import re
 import datetime
 from blog_utils import extract_blog_id
 from scrape_blog_admin import scrape_blog_admin_mode, get_posts_via_admin_api, create_authenticated_session as create_admin_session
-from scrape_blog_mobile import scrape_blog_mobile_mode, fetch_mobile_lognos, get_post_detail as get_mobile_post_detail
+from scrape_blog_mobile import scrape_blog_mobile_mode, fetch_mobile_lognos, get_post_detail
 from scrape_blog_rss import scrape_blog_rss_mode, fetch_rss_lognos
 
 # 로깅 설정
@@ -223,7 +223,9 @@ def scrape_blog_pipeline(blog_url, access_token=None):
         
         for log_no in all_log_nos:
             try:
-                post_detail = get_mobile_post_detail(session, blog_id, log_no)
+                # 현재 세션 환경에 맞는 함수 선택 (모바일)
+                from scrape_blog_mobile import get_post_detail
+                post_detail = get_post_detail(session, blog_id, log_no)
                 if post_detail:
                     # 필요한 필드 확인 및 추가
                     if 'logNo' not in post_detail:
@@ -252,7 +254,8 @@ def scrape_blog_pipeline(blog_url, access_token=None):
             "rss": "RSS 피드"
         }
         
-        method_display = method_names.get(method_used, str(method_used))
+        # 안전한 메서드 이름 표시 
+        method_display = method_names[method_used] if method_used in method_names else str(method_used)
         private_post_note = ""
         if method_used == "rss" and access_token:
             private_post_note = " (RSS는 비공개 글은 포함하지 않습니다.)"
