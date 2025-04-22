@@ -1,27 +1,27 @@
 import logging
-import re
-from urllib.parse import urlparse
+from blog_utils import extract_blog_id as utils_extract_blog_id
 
 logger = logging.getLogger(__name__)
 
 def extract_blog_id(blog_url):
-    """Extract blog ID from Naver blog URL."""
-    parsed_url = urlparse(blog_url)
-    path_parts = parsed_url.path.strip('/').split('/')
+    """
+    네이버 블로그 URL에서 blogId를 추출합니다.
     
-    # Try different ways to extract the blog ID
-    if parsed_url.netloc == 'blog.naver.com' or parsed_url.netloc == 'm.blog.naver.com':
-        # Format: blog.naver.com/username
-        if len(path_parts) > 0:
-            return path_parts[0]
-    
-    # If no blog ID found, use a fallback approach with regex
-    match = re.search(r'blog\.naver\.com/([^/]+)', blog_url)
-    if match:
-        return match.group(1)
-    
-    # If still no match, raise an error
-    raise ValueError("Could not extract blog ID from the provided URL")
+    Args:
+        blog_url (str): 네이버 블로그 URL
+        
+    Returns:
+        str: 블로그 ID (아이디)
+        
+    Raises:
+        ValueError: URL이 네이버 블로그 형식이 아니거나 ID를 추출할 수 없는 경우
+    """
+    try:
+        # 강화된 URL 추출 함수 사용
+        return utils_extract_blog_id(blog_url)
+    except ValueError as e:
+        # 이전 방식과 호환성 유지를 위해 오류 메시지 변환
+        raise ValueError("Could not extract blog ID from the provided URL")
 
 # 쿠키 기반 스크래퍼는 제거되었습니다.
 # OAuth 기반 스크래퍼만 사용합니다. (oauth_scraper.py 참조)
