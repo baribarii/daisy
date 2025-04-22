@@ -200,77 +200,7 @@ def oauth_submit_blog():
         flash(f'오류가 발생했습니다: {str(e)}', 'danger')
         return redirect(url_for('blog_form'))
 
-@app.route('/submit_blog', methods=['POST'])
-def submit_blog():
-    blog_url = request.form.get('blog_url', '')
-    cookie_value = request.form.get('cookie_value', '')
-    
-    if not blog_url or not cookie_value:
-        flash('Blog URL and cookie value are required', 'danger')
-        return redirect(url_for('index'))
-    
-    # Validate the blog URL
-    if 'blog.naver.com' not in blog_url:
-        flash('Please enter a valid Naver blog URL', 'danger')
-        return redirect(url_for('index'))
-    
-    try:
-        # Start the scraping process
-        flash('Starting to collect blog content...', 'info')
-        
-        # Create a new blog entry in the database
-        blog = Blog(url=blog_url)
-        db.session.add(blog)
-        db.session.commit()
-        
-        # Store blog_id in session for tracking
-        session['blog_id'] = blog.id
-        
-        # 여러 스크래핑 방법 시도
-        try:
-            # 1. 먼저 원래 스크래퍼 시도
-            from scraper import scrape_naver_blog
-            logger.debug("Trying original scraper...")
-            posts = scrape_naver_blog(blog_url, cookie_value)
-        except Exception as e:
-            logger.warning(f"Original scraper failed: {str(e)}")
-            
-            # 2. 대체 스크래퍼 시도
-            try:
-                logger.debug("Trying fallback scraper...")
-                from fallback_scraper import scrape_naver_blog_with_fallback
-                posts = scrape_naver_blog_with_fallback(blog_url, cookie_value)
-            except Exception as e2:
-                logger.error(f"Fallback scraper also failed: {str(e2)}")
-                raise Exception(f"Failed to extract any posts from the blog. Please check the blog URL and cookie value.")
-        
-        if not posts:
-            flash('No posts found or unable to access the blog', 'danger')
-            return redirect(url_for('index'))
-        
-        # Log number of posts found
-        logger.debug(f"Successfully extracted {len(posts)} posts")
-        
-        # Save posts to database
-        for post in posts:
-            blog_post = BlogPost(
-                blog_id=blog.id,
-                title=post.get('title', ''),
-                content=post.get('content', ''),
-                date=post.get('date', ''),
-                is_private=post.get('is_private', False)
-            )
-            db.session.add(blog_post)
-        
-        db.session.commit()
-        
-        # Redirect to the analysis process
-        return redirect(url_for('analyze_blog', blog_id=blog.id))
-    
-    except Exception as e:
-        logger.error(f"Error during blog submission: {str(e)}")
-        flash(f'An error occurred: {str(e)}', 'danger')
-        return redirect(url_for('index'))
+# 쿠키 기반 스크래핑이 제거되었으므로 submit_blog 라우트도 제거
 
 @app.route('/analyze/<int:blog_id>')
 def analyze_blog(blog_id):
