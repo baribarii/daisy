@@ -214,10 +214,48 @@ def oauth_submit_blog():
         # 세션에 큰 데이터 저장 금지 - 스크랩한 포스트 내용을 세션에 직접 저장하지 않음
         # 대신 포스트 ID만 저장하고 필요할 때 DB에서 조회
         
-        # 데이터베이스에 포스트 저장
+        # 데이터베이스에 포스트 저장 (중복 제거 로직 적용)
         try:
+            # 이 블로그에 있는 기존 포스트 logNo 목록 가져오기
+            existing_logno_query = db.session.query(BlogPost.logNo).filter(BlogPost.blog_id == blog.id)
+            existing_lognos = [row[0] for row in existing_logno_query.all() if row[0]]
+            
+            # 새로 저장할 포스트와 기존 포스트 계산
+            new_posts = []
+            duplicates = 0
+            
+            # 중복 검사 및 처리
             for post in posts:
-                # 네이버 블로그의 실제 logNo(포스트 ID) 저장
+                log_no = post.get('logNo', '')
+                
+                # logNo가 없는 경우는 건너뛰기
+                if not log_no:
+                    logger.warning(f"logNo가 없는 포스트 제외: {post.get('title')}")
+                    continue
+                
+                # 중복 검사
+                if log_no in existing_lognos:
+                    duplicates += 1
+                    logger.debug(f"중복 포스트 제외: logNo={log_no}, title={post.get('title')}")
+                    
+                    # 기존 포스트의 날짜나 제목 업데이트가 필요한 경우
+                    existing_post = BlogPost.query.filter_by(blog_id=blog.id, logNo=log_no).first()
+                    if existing_post:
+                        # 날짜가 비어있거나 새 데이터에서 날짜가 있으면 업데이트
+                        if (not existing_post.date or not existing_post.date.strip()) and post.get('date'):
+                            existing_post.date = post.get('date')
+                            logger.debug(f"기존 포스트 날짜 업데이트: logNo={log_no}")
+                        
+                        # 비공개 상태가 변경된 경우 업데이트
+                        if existing_post.is_private != post.get('is_private', False):
+                            existing_post.is_private = post.get('is_private', False)
+                            logger.debug(f"비공개 상태 업데이트: logNo={log_no}")
+                else:
+                    # 새 포스트 추가
+                    new_posts.append(post)
+            
+            # 새 포스트만 저장
+            for post in new_posts:
                 blog_post = BlogPost(
                     blog_id=blog.id,
                     title=post.get('title', ''),
@@ -227,6 +265,9 @@ def oauth_submit_blog():
                     logNo=post.get('logNo', '')  # 네이버 블로그 포스트 ID
                 )
                 db.session.add(blog_post)
+            
+            # 저장 결과 로깅
+            logger.info(f"총 {len(posts)}개 포스트 중 {len(new_posts)}개 저장, {duplicates}개 중복 제외")
             
             # 모든 작업이 성공하면 커밋
             db.session.commit()

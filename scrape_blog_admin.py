@@ -74,26 +74,64 @@ def create_authenticated_session(access_token):
     Returns:
         requests.Session: 인증된 세션 객체
     """
+    # 세션 생성
     session = requests.Session()
     
-    # 토큰을 쿠키와 헤더에 모두 설정 (네이버의 다양한 인증 방식 지원)
+    # 기본 헤더 설정
     session.headers.update({
-        'Authorization': f'Bearer {access_token}',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-origin',
+        'Connection': 'keep-alive',
+        'Referer': 'https://blog.naver.com/'
     })
     
-    # OAuth 토큰을 쿠키로 변환 (네이버 블로그 인증에 필요)
+    # OAuth 토큰 활용 (두 가지 방식으로 처리)
     if access_token:
-        token_prefix = access_token[:16] if len(access_token) >= 16 else access_token
-        token_suffix = access_token[-16:] if len(access_token) >= 16 else access_token
+        # 1. Authorization 헤더로 OAuth 토큰 전달
+        session.headers.update({
+            'Authorization': f'Bearer {access_token}'
+        })
         
-        # 네이버 인증 쿠키 설정
-        cookies = {
-            'NID_AUT': token_prefix,
-            'NID_SES': token_suffix
-        }
-        
-        session.cookies.update(cookies)
+        # 2. 네이버 인증 쿠키 설정 - 비공개 글 접근에 필수
+        try:
+            # OAuth 토큰을 NID_AUT, NID_SES 쿠키로 변환
+            # 접두사/접미사 분리 방식
+            token_prefix = access_token[:16] if len(access_token) >= 16 else access_token
+            token_suffix = access_token[-16:] if len(access_token) >= 16 else access_token
+            
+            # 주요 네이버 인증 쿠키 추가
+            cookies = {
+                'NID_AUT': token_prefix,
+                'NID_SES': token_suffix,
+                'NID_JKL': token_prefix[:8] if len(token_prefix) >= 8 else token_prefix,
+                # 추가적인 네이버 쿠키로 인증 강화
+                'NID_CHECK': 'naver',
+                'JSESSIONID': token_suffix.replace('-', ''),
+                'nid_inf': access_token.replace('-', '')[:12] if len(access_token) >= 12 else access_token,
+            }
+            
+            # 쿠키 설정
+            session.cookies.update(cookies)
+            logger.debug("인증 쿠키 설정 성공")
+            
+        except Exception as e:
+            logger.error(f"인증 쿠키 설정 중 오류: {str(e)}")
+    
+    # 세션 검증
+    try:
+        # 인증 확인
+        test_url = "https://blog.naver.com/"
+        response = session.get(test_url, timeout=5)
+        if response.status_code == 200:
+            logger.debug("세션 인증 확인 완료")
+        else:
+            logger.warning(f"인증 확인 실패 (status: {response.status_code})")
+    except Exception as e:
+        logger.warning(f"인증 확인 중 오류: {str(e)}")
     
     return session
 
