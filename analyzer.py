@@ -240,25 +240,53 @@ def analyze_blog_content(content):
             # Make the API call to gpt-4o
             # the newest OpenAI model is "gpt-4o" which was released May 13, 2024.
             # do not change this unless explicitly requested by the user
-            response = openai.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "당신은 작성된 내용에서 통찰력을 추출하는 데 특화된 심리 분석가입니다. 제공된 텍스트를 바탕으로 한국어로 사려 깊고 미묘한 분석을 제공하세요. 모든 응답은 한국어로만 작성해야 합니다."
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt.format(content=content)
-                    }
-                ],
-                response_format={"type": "json_object"},
-                max_tokens=4000,
-                temperature=0.7,
-                timeout=120  # 120초(2분) 타임아웃 설정으로 늘림
-            )
+            logger.debug("OpenAI API 호출 시작 - model: gpt-4o")
+            
+            # 재시도 메커니즘 추가
+            max_retries = 3
+            retry_count = 0
+            retry_delay = 10  # 초 단위
+            last_error = None
+            
+            while retry_count < max_retries:
+                try:
+                    response = openai.chat.completions.create(
+                        model="gpt-4o",
+                        messages=[
+                            {
+                                "role": "system",
+                                "content": "당신은 작성된 내용에서 통찰력을 추출하는 데 특화된 심리 분석가입니다. 제공된 텍스트를 바탕으로 한국어로 사려 깊고 미묘한 분석을 제공하세요. 모든 응답은 한국어로만 작성해야 합니다."
+                            },
+                            {
+                                "role": "user",
+                                "content": prompt.format(content=content)
+                            }
+                        ],
+                        response_format={"type": "json_object"},
+                        max_tokens=4000,
+                        temperature=0.7,
+                        timeout=180  # 3분(180초)으로 타임아웃 설정 늘림
+                    )
+                    # 성공했으면 반복문 종료
+                    break
+                    
+                except Exception as e:
+                    logger.error(f"OpenAI API 호출 시도 {retry_count+1}/{max_retries} 실패: {str(e)}")
+                    last_error = e
+                    retry_count += 1
+                    
+                    if retry_count < max_retries:
+                        import time
+                        logger.debug(f"{retry_delay}초 후 재시도...")
+                        time.sleep(retry_delay)
+                    
+            # 모든 재시도 후에도 실패하면 기본값 반환
+            if retry_count == max_retries:
+                logger.error(f"OpenAI API 최대 재시도 횟수 초과, 기본 분석 결과 반환: {str(last_error)}")
+                return create_default_analysis_result(content)
+                
         except Exception as api_error:
-            logger.error(f"OpenAI API 호출 오류: {str(api_error)}")
+            logger.error(f"OpenAI API 호출 과정에서 오류 발생: {str(api_error)}")
             # 기본 분석 결과 반환
             return create_default_analysis_result(content)
         

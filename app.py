@@ -181,12 +181,14 @@ def oauth_submit_blog():
         
         # 데이터베이스에 포스트 저장
         for post in posts:
+            # 네이버 블로그의 실제 logNo(포스트 ID) 저장
             blog_post = BlogPost(
                 blog_id=blog.id,
                 title=post.get('title', ''),
                 content=post.get('content', ''),
                 date=post.get('date', ''),
-                is_private=post.get('is_private', False)
+                is_private=post.get('is_private', False),
+                logNo=post.get('logNo', '')  # 네이버 블로그 포스트 ID
             )
             db.session.add(blog_post)
         
@@ -220,12 +222,35 @@ def analyze_blog(blog_id):
         return redirect(url_for('view_report', report_id=existing_report.id))
     
     try:
-        # Prepare the blog content for analysis
+        # 블로그 콘텐츠 분석을 위한 전처리
         all_content = ""
-        for post in posts:
-            all_content += f"Title: {post.title}\nContent: {post.content}\nDate: {post.date}\n\n"
+        post_count = len(posts)
+        logger.debug(f"총 {post_count}개의 포스트를 분석합니다.")
         
-        # Analyze the content
+        # 날짜 순으로 정렬하여 시간에 따른 변화 분석 가능하도록 함
+        sorted_posts = sorted(posts, key=lambda p: p.created_at if hasattr(p, 'created_at') and p.created_at else p.date if p.date else "")
+        
+        # 포스트 메타데이터와 함께 콘텐츠 구성
+        for i, post in enumerate(sorted_posts, 1):
+            # 포스트 번호와 날짜 추가
+            date_info = f"작성일: {post.date}" if post.date else ""
+            privacy_info = "[비공개 글]" if post.is_private else "[공개 글]"
+            
+            # 각 포스트별 구분선 추가하여 가독성 향상
+            post_header = f"===== 포스트 {i}/{post_count} {privacy_info} {date_info} =====\n"
+            
+            # HTML 태그 제거 및 텍스트 정리
+            import re
+            clean_content = re.sub(r'<[^>]+>', ' ', post.content)  # HTML 태그 제거
+            clean_content = re.sub(r'\s+', ' ', clean_content)     # 여러 공백을 하나로 통일
+            
+            # 제목과 콘텐츠 추가
+            all_content += f"{post_header}\n제목: {post.title}\n\n내용:\n{clean_content}\n\n"
+        
+        # 로그에 분석할 총 콘텐츠 길이 기록
+        logger.debug(f"분석할 총 콘텐츠 길이: {len(all_content)} 글자")
+        
+        # 콘텐츠 분석 실행
         analysis_result = analyze_blog_content(all_content)
         
         # Create a new report

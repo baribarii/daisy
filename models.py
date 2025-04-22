@@ -27,6 +27,8 @@ class BlogPost(db.Model):
     date = db.Column(db.String(50), nullable=True)
     is_private = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # 네이버 블로그의 실제 logNo (포스트 ID)
+    logNo = db.Column(db.String(50), nullable=True)
 
 class Report(db.Model):
     id = db.Column(db.Integer, primary_key=True)
