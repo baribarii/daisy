@@ -182,8 +182,96 @@ def oauth_submit_blog():
         # 세션에 blog_id 저장 - 서버 세션 사용
         session['blog_id'] = blog.id
         
-        # OAuth 토큰을 사용하여 스크래핑
-        posts = scrape_blog_with_oauth(blog_url, session['access_token'])
+        # OAuth 토큰을 사용하여 스크래핑 - 여기서는 Replit DB를 사용하지 않는 간소화된 방식 사용
+        try:
+            # 블로그 ID 추출
+            from scraper import extract_blog_id
+            blog_id = extract_blog_id(blog_url)
+            
+            if not blog_id:
+                raise ValueError("블로그 URL에서 ID를 추출할 수 없습니다.")
+            
+            # 네이버 OAuth API를 사용하여 블로그 정보 직접 가져오기
+            import time
+            import requests
+            from bs4 import BeautifulSoup
+            
+            # 인증된 세션 생성
+            api_session = requests.Session()
+            api_session.headers.update({
+                'Authorization': f'Bearer {session["access_token"]}',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            })
+            
+            # 직접 API 호출 - 최근 게시물 30개 가져오기
+            posts = []
+            
+            # 블로그 메인에서 게시물 ID 수집
+            response = api_session.get(f'https://blog.naver.com/{blog_id}')
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.text, 'html.parser')
+                post_links = soup.select('a[href*="logNo="]')
+                
+                log_nos = []
+                for link in post_links:
+                    href = link.get('href', '')
+                    if 'logNo=' in href:
+                        log_no = href.split('logNo=')[1].split('&')[0]
+                        if log_no.isdigit() and log_no not in log_nos:
+                            log_nos.append(log_no)
+                
+                # 최대 30개로 제한
+                log_nos = log_nos[:30]
+                
+                # 각 게시물 내용 가져오기
+                for log_no in log_nos:
+                    try:
+                        post_url = f'https://blog.naver.com/PostView.naver?blogId={blog_id}&logNo={log_no}'
+                        post_response = api_session.get(post_url)
+                        
+                        if post_response.status_code == 200:
+                            post_soup = BeautifulSoup(post_response.text, 'html.parser')
+                            
+                            # 제목 추출
+                            title_elem = post_soup.select_one('.se-title-text, .tit_h3, .pcol1, h3.tit_view')
+                            title = title_elem.get_text().strip() if title_elem else '제목 없음'
+                            
+                            # 본문 추출
+                            content_elem = post_soup.select_one('.se-main-container, #postViewArea, .post_ct')
+                            content = content_elem.get_text().strip() if content_elem else ''
+                            
+                            # 날짜 추출
+                            date_elem = post_soup.select_one('.se_publishDate, .date, .se_date')
+                            date = date_elem.get_text().strip() if date_elem else ''
+                            
+                            # 비공개 여부 확인
+                            is_private = '비공개' in post_soup.get_text() or '권한이 없습니다' in post_soup.get_text()
+                            
+                            posts.append({
+                                'logNo': log_no,
+                                'title': title,
+                                'content': content,
+                                'date': date,
+                                'is_private': is_private,
+                                'url': post_url
+                            })
+                            
+                            # 서버 부하 방지를 위한 짧은 대기
+                            time.sleep(0.5)
+                            
+                    except Exception as post_error:
+                        logger.error(f"포스트 {log_no} 처리 중 오류: {str(post_error)}")
+            
+            if not posts:
+                raise ValueError("블로그에서 포스트를 찾을 수 없습니다. 블로그 URL을 확인해주세요.")
+                
+            logger.debug(f"성공적으로 {len(posts)}개의 포스트를 추출했습니다.")
+            
+        except Exception as e:
+            logger.error(f"스크래핑 오류: {str(e)}")
+            db.session.rollback()
+            flash(f'블로그 스크래핑 중 오류가 발생했습니다: {str(e)}', 'danger')
+            return redirect(url_for('blog_form'))
         
         if not posts:
             # 롤백 후 리다이렉트
