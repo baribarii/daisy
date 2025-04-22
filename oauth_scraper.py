@@ -288,10 +288,36 @@ class NaverOAuthScraper:
                 data = response.json()
                 if 'result' in data:
                     result = data['result']
+                    # HTML 콘텐츠 정제
+                    html_content = result.get('contentHtml', '')
+                    soup = BeautifulSoup(html_content, 'html.parser')
+                    
+                    # 불필요한 UI 요소 제거
+                    exclude_classes = [
+                        'btn_area', 'social_area', 'like_area', 'btn_share',
+                        'font_size_control', 'tool_area', 'tag_area', 'layer_post',
+                        'category_area', 'url_area', 'btn_like', 'writer_info',
+                        'comment_area', 'footer_area', 'area_sympathy', 'post_menu'
+                    ]
+                    
+                    for exclude_class in exclude_classes:
+                        for element in soup.select(f'.{exclude_class}'):
+                            element.decompose()
+                    
+                    # 내용 추출 (p 태그 중심)
+                    content_parts = []
+                    for p_tag in soup.select('p'):
+                        text = p_tag.get_text(strip=True)
+                        if text and len(text) > 20:  # 의미있는 텍스트만 포함
+                            content_parts.append(text)
+                    
+                    # p 태그에서 충분한 내용을 찾지 못한 경우 전체 내용 사용
+                    content = '\n\n'.join(content_parts) if content_parts else soup.get_text(separator='\n', strip=True)
+                    
                     return {
                         'logNo': logno,
                         'title': result.get('title', ''),
-                        'content': BeautifulSoup(result.get('contentHtml', ''), 'html.parser').get_text(separator='\n', strip=True),
+                        'content': content,
                         'date': result.get('addDate', ''),
                         'is_private': not result.get('openType', True),
                         'url': f"https://blog.naver.com/{blog_id}/{logno}"
@@ -322,19 +348,49 @@ class NaverOAuthScraper:
                     if title:
                         break
             
-            # 내용 추출
-            content = ""
-            content_selectors = [
-                '.se_doc_viewer', '.view', '.post_ct', 
-                '.post_view', '.post_content', '.se-main-container'
+            # 불필요한 UI 요소 제거
+            exclude_classes = [
+                'btn_area', 'social_area', 'like_area', 'btn_share',
+                'font_size_control', 'tool_area', 'tag_area', 'layer_post',
+                'category_area', 'url_area', 'btn_like', 'writer_info',
+                'comment_area', 'footer_area', 'area_sympathy', 'post_menu'
             ]
             
+            for exclude_class in exclude_classes:
+                for element in soup.select(f'.{exclude_class}'):
+                    element.decompose()
+            
+            # 내용 추출 (더 정밀한 선택자 사용)
+            content_selectors = [
+                '.se-main-container p', '.se_doc_viewer p', '.view p', 
+                '.post_ct p', '.post_view p', '.post_content p',
+                '.se-text-paragraph', '.se_paragraph'
+            ]
+            
+            content = ""
+            # 의미있는 콘텐츠 추출 시도
             for selector in content_selectors:
-                content_elem = soup.select_one(selector)
-                if content_elem:
-                    content = content_elem.get_text(separator='\n', strip=True)
-                    if content:
+                content_elems = soup.select(selector)
+                if content_elems:
+                    content_parts = []
+                    for elem in content_elems:
+                        text = elem.get_text(strip=True)
+                        if text and len(text) > 20:  # 의미있는 텍스트만 포함
+                            content_parts.append(text)
+                    
+                    if content_parts:
+                        content = '\n\n'.join(content_parts)
                         break
+            
+            # 백업 방법: 여전히 내용이 없으면 기존 방식 시도
+            if not content:
+                fallback_selectors = ['.se-main-container', '.view', '.post_ct', '.post_content']
+                for selector in fallback_selectors:
+                    content_elem = soup.select_one(selector)
+                    if content_elem:
+                        content = content_elem.get_text(separator='\n', strip=True)
+                        if content:
+                            break
             
             # 날짜 추출
             date = ""
