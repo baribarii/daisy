@@ -30,6 +30,17 @@ app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
 }
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
+# 서버 세션 저장소 설정 - 쿠키 크기 문제 해결을 위해 파일 시스템 세션 사용
+# Flask 기본 세션은 쿠키에 데이터를 저장하므로 크기 제한이 있음
+# 따라서 대용량 세션 데이터를 서버에 저장하도록 변경
+import os
+from flask_session import Session
+app.config['SESSION_TYPE'] = 'filesystem'
+app.config['SESSION_FILE_DIR'] = os.path.join(os.getcwd(), 'flask_session')
+app.config['SESSION_PERMANENT'] = False
+app.config['SESSION_USE_SIGNER'] = True
+Session(app)
+
 # initialize the app with the extension
 db.init_app(app)
 
@@ -157,47 +168,67 @@ def oauth_submit_blog():
         flash('세션이 만료되었습니다. 다시 로그인해주세요.', 'warning')
         return redirect(url_for('oauth_login'))
     
+    # 컨텍스트 매니저를 사용한 세션 관리
     try:
         # 스크래핑 시작
         flash('블로그 콘텐츠 수집을 시작합니다...', 'info')
         
+        # 세션 작업 시작 
         # 데이터베이스에 블로그 등록
         blog = Blog(url=blog_url)
         db.session.add(blog)
-        db.session.commit()
+        db.session.flush()  # ID 생성을 위해 플러시 (아직 커밋은 안 함)
         
-        # 세션에 blog_id 저장
+        # 세션에 blog_id 저장 - 서버 세션 사용
         session['blog_id'] = blog.id
         
         # OAuth 토큰을 사용하여 스크래핑
         posts = scrape_blog_with_oauth(blog_url, session['access_token'])
         
         if not posts:
+            # 롤백 후 리다이렉트
+            db.session.rollback()
             flash('블로그에서 포스트를 찾을 수 없습니다.', 'danger')
             return redirect(url_for('blog_form'))
         
         # 로그 기록
         logger.debug(f"성공적으로 {len(posts)}개의 포스트를 추출했습니다.")
         
+        # 세션에 큰 데이터 저장 금지 - 스크랩한 포스트 내용을 세션에 직접 저장하지 않음
+        # 대신 포스트 ID만 저장하고 필요할 때 DB에서 조회
+        
         # 데이터베이스에 포스트 저장
-        for post in posts:
-            # 네이버 블로그의 실제 logNo(포스트 ID) 저장
-            blog_post = BlogPost(
-                blog_id=blog.id,
-                title=post.get('title', ''),
-                content=post.get('content', ''),
-                date=post.get('date', ''),
-                is_private=post.get('is_private', False),
-                logNo=post.get('logNo', '')  # 네이버 블로그 포스트 ID
-            )
-            db.session.add(blog_post)
-        
-        db.session.commit()
-        
-        # 분석 페이지로 리다이렉트
-        return redirect(url_for('analyze_blog', blog_id=blog.id))
+        try:
+            for post in posts:
+                # 네이버 블로그의 실제 logNo(포스트 ID) 저장
+                blog_post = BlogPost(
+                    blog_id=blog.id,
+                    title=post.get('title', ''),
+                    content=post.get('content', ''),
+                    date=post.get('date', ''),
+                    is_private=post.get('is_private', False),
+                    logNo=post.get('logNo', '')  # 네이버 블로그 포스트 ID
+                )
+                db.session.add(blog_post)
+            
+            # 모든 작업이 성공하면 커밋
+            db.session.commit()
+            
+            # 분석 페이지로 리다이렉트
+            return redirect(url_for('analyze_blog', blog_id=blog.id))
+            
+        except Exception as inner_e:
+            # 데이터베이스 오류 발생 시 롤백
+            db.session.rollback()
+            logger.error(f"포스트 저장 중 오류: {str(inner_e)}")
+            flash(f'포스트 저장 중 오류가 발생했습니다: {str(inner_e)}', 'danger')
+            return redirect(url_for('blog_form'))
     
     except Exception as e:
+        # 외부 예외 처리 - 세션 확인 및 닫기
+        if db.session.is_active:
+            db.session.rollback()
+        
         logger.error(f"블로그 제출 오류: {str(e)}")
         flash(f'오류가 발생했습니다: {str(e)}', 'danger')
         return redirect(url_for('blog_form'))
@@ -250,102 +281,159 @@ def analyze_blog(blog_id):
         # 로그에 분석할 총 콘텐츠 길이 기록
         logger.debug(f"분석할 총 콘텐츠 길이: {len(all_content)} 글자")
         
-        # 콘텐츠 분석 실행
-        analysis_result = analyze_blog_content(all_content)
-        
-        # Create a new report
-        report = Report(
-            blog_id=blog_id,
-            characteristics=analysis_result.get('characteristics', ''),
-            strengths=analysis_result.get('strengths', ''),
-            weaknesses=analysis_result.get('weaknesses', ''),
-            thinking_patterns=analysis_result.get('thinking_patterns', ''),
-            decision_making=analysis_result.get('decision_making', ''),
-            unconscious_biases=analysis_result.get('unconscious_biases', ''),
-            advice=analysis_result.get('advice', ''),
-            created_at=time.strftime('%Y-%m-%d %H:%M:%S')
-        )
-        
-        db.session.add(report)
-        db.session.commit()
-        
-        return redirect(url_for('view_report', report_id=report.id))
+        try:
+            # 세션에 큰 데이터 저장 금지 - 텍스트 내용을 session에 저장하지 않음
+            
+            # 콘텐츠 분석 실행
+            analysis_result = analyze_blog_content(all_content)
+            
+            # Create a new report
+            report = Report(
+                blog_id=blog_id,
+                characteristics=analysis_result.get('characteristics', ''),
+                strengths=analysis_result.get('strengths', ''),
+                weaknesses=analysis_result.get('weaknesses', ''),
+                thinking_patterns=analysis_result.get('thinking_patterns', ''),
+                decision_making=analysis_result.get('decision_making', ''),
+                unconscious_biases=analysis_result.get('unconscious_biases', ''),
+                advice=analysis_result.get('advice', ''),
+                created_at=time.strftime('%Y-%m-%d %H:%M:%S')
+            )
+            
+            # 중첩된 트랜잭션 방지를 위한 명시적 세션 관리
+            db.session.add(report)
+            db.session.commit()
+            
+            return redirect(url_for('view_report', report_id=report.id))
+            
+        except Exception as inner_e:
+            # 중첩된 예외 처리
+            if db.session.is_active:
+                db.session.rollback()
+            logger.error(f"콘텐츠 분석 및 리포트 생성 중 오류: {str(inner_e)}")
+            flash(f'콘텐츠 분석 중 오류가 발생했습니다: {str(inner_e)}', 'danger')
+            return redirect(url_for('index'))
     
     except Exception as e:
+        # 최상위 예외 처리
+        if db.session.is_active:
+            db.session.rollback()
         logger.error(f"Error during analysis: {str(e)}")
         flash(f'An error occurred during analysis: {str(e)}', 'danger')
         return redirect(url_for('index'))
 
 @app.route('/report/<int:report_id>')
 def view_report(report_id):
-    # Get the report
-    report = Report.query.get_or_404(report_id)
-    
-    # Get the blog
-    blog = Blog.query.get_or_404(report.blog_id)
-    
-    # Get the blog posts (최대 30개까지 표시 - 최신 순으로 정렬)
-    posts = BlogPost.query.filter_by(blog_id=report.blog_id).order_by(BlogPost.date.desc()).limit(30).all()
-    
-    # 각 포스트 컨텐츠 중 일부만 발췌 (미리보기용)
-    for post in posts:
-        # 본문이 길면 앞부분 150자만 표시하고 '...' 추가 (UI 레이아웃 개선)
-        if len(post.content) > 150:
-            post.preview = post.content[:150] + '...'
-        else:
-            post.preview = post.content
+    try:
+        # Get the report
+        report = Report.query.get_or_404(report_id)
         
-        # 비공개 글인 경우 표시 추가
-        if post.is_private:
-            post.preview = "[비공개 글] " + post.preview
+        # Get the blog
+        blog = Blog.query.get_or_404(report.blog_id)
         
-        # 네이버 블로그 URL 형식으로 포스트 URL 구성
-        # 블로그 URL에서 ID 추출
-        import re
-        from scraper import extract_blog_id
+        # Get the blog posts (최대 30개까지 표시 - 최신 순으로 정렬)
+        posts = BlogPost.query.filter_by(blog_id=report.blog_id).order_by(BlogPost.date.desc()).limit(30).all()
         
-        # 블로그 URL에서 ID 추출
-        blog_user_id = extract_blog_id(blog.url)
-        if not blog_user_id:
-            # URL에서 직접 추출 시도
-            blog_user_id = blog.url.split('/')[-1]
-            if '?' in blog_user_id:
-                blog_user_id = blog_user_id.split('?')[0]
+        # 세션에서 큰 데이터 저장 안 함 - 디스플레이용 정보만 메모리에서 처리
+        post_views = []
         
-        # DB에 저장된 실제 logNo 사용 (BlogPost.logNo 필드 필요)
-        # 데이터 모델에 logNo가 없으면 content에서 추출 시도
-        if hasattr(post, 'logNo') and post.logNo:
-            post.url = f"https://blog.naver.com/{blog_user_id}/{post.logNo}"
-        else:
-            # content에서 logNo 추출 시도
-            logno_match = re.search(r'logNo=(\d+)', post.content)
-            if logno_match:
-                logno = logno_match.group(1)
-                post.url = f"https://blog.naver.com/{blog_user_id}/{logno}"
+        # 각 포스트 컨텐츠 중 일부만 발췌 (미리보기용)
+        for post in posts:
+            post_view = {}
+            
+            # 본문이 길면 앞부분 150자만 표시하고 '...' 추가 (UI 레이아웃 개선)
+            if len(post.content) > 150:
+                post_view['preview'] = post.content[:150] + '...'
             else:
-                # 마지막 대안: 데이터베이스 ID 사용 (실제 네이버 URL과 다를 수 있음)
-                post.url = f"https://blog.naver.com/{blog_user_id}?Redirect=Log&logNo={post.id}"
-    
-    return render_template('report.html', report=report, blog=blog, posts=posts)
+                post_view['preview'] = post.content
+            
+            # 비공개 글인 경우 표시 추가
+            if post.is_private:
+                post_view['preview'] = "[비공개 글] " + post_view['preview']
+            
+            # 네이버 블로그 URL 형식으로 포스트 URL 구성
+            # 블로그 URL에서 ID 추출
+            import re
+            from scraper import extract_blog_id
+            
+            # 블로그 URL에서 ID 추출
+            blog_user_id = extract_blog_id(blog.url)
+            if not blog_user_id:
+                # URL에서 직접 추출 시도
+                blog_user_id = blog.url.split('/')[-1]
+                if '?' in blog_user_id:
+                    blog_user_id = blog_user_id.split('?')[0]
+            
+            # DB에 저장된 실제 logNo 사용 (BlogPost.logNo 필드 필요)
+            # 데이터 모델에 logNo가 없으면 content에서 추출 시도
+            if hasattr(post, 'logNo') and post.logNo:
+                post_view['url'] = f"https://blog.naver.com/{blog_user_id}/{post.logNo}"
+            else:
+                # content에서 logNo 추출 시도
+                logno_match = re.search(r'logNo=(\d+)', post.content)
+                if logno_match:
+                    logno = logno_match.group(1)
+                    post_view['url'] = f"https://blog.naver.com/{blog_user_id}/{logno}"
+                else:
+                    # 마지막 대안: 데이터베이스 ID 사용 (실제 네이버 URL과 다를 수 있음)
+                    post_view['url'] = f"https://blog.naver.com/{blog_user_id}?Redirect=Log&logNo={post.id}"
+            
+            # 필요한 기타 정보
+            post_view['title'] = post.title
+            post_view['date'] = post.date
+            post_view['is_private'] = post.is_private
+            
+            # 메모리 내 배열에 추가
+            post_views.append(post_view)
+        
+        # 블로그 및 보고서 정보의 필수 부분만 템플릿에 전달
+        blog_info = {
+            'id': blog.id,
+            'url': blog.url
+        }
+        
+        # 세션에 큰 데이터 저장 금지 (필요한 경우 ID만 저장하고 매번 DB에서 다시 가져오기)
+        # 렌더링에만 필요한 데이터는 request/response 사이클에만 존재
+        
+        return render_template('report.html', report=report, blog=blog_info, posts=post_views)
+        
+    except Exception as e:
+        # 예외 처리 - 세션 닫기 확인
+        if db.session.is_active:
+            db.session.rollback()
+            
+        logger.error(f"보고서 조회 중 오류: {str(e)}")
+        flash(f'보고서를 조회하는 중 오류가 발생했습니다: {str(e)}', 'danger')
+        return redirect(url_for('index'))
 
 @app.route('/status/<int:blog_id>')
 def status(blog_id):
-    # Check if the blog exists
-    blog = Blog.query.get_or_404(blog_id)
-    
-    # Count posts for this blog
-    post_count = BlogPost.query.filter_by(blog_id=blog_id).count()
-    
-    # Check if a report exists
-    report = Report.query.filter_by(blog_id=blog_id).first()
-    
-    status_data = {
-        'post_count': post_count,
-        'has_report': report is not None,
-        'report_id': report.id if report else None
-    }
-    
-    return jsonify(status_data)
+    try:
+        # Check if the blog exists
+        blog = Blog.query.get_or_404(blog_id)
+        
+        # Count posts for this blog
+        post_count = BlogPost.query.filter_by(blog_id=blog_id).count()
+        
+        # Check if a report exists
+        report = Report.query.filter_by(blog_id=blog_id).first()
+        
+        status_data = {
+            'post_count': post_count,
+            'has_report': report is not None,
+            'report_id': report.id if report else None
+        }
+        
+        # 세션 데이터를 최소화 - 세션에 상태 데이터를 저장하지 않고 API 응답으로만 반환
+        return jsonify(status_data)
+        
+    except Exception as e:
+        # 예외 발생 시 세션 롤백
+        if db.session.is_active:
+            db.session.rollback()
+            
+        logger.error(f"상태 확인 중 오류: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 @app.errorhandler(404)
 def page_not_found(e):
