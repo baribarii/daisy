@@ -127,47 +127,57 @@ class NaverOAuthScraper:
     
     def scrape_blog(self, blog_id):
         """
-        블로그 스크래핑 메인 함수 - 최근 30개 포스트 처리
+        블로그 스크래핑 메인 함수 - 비공개 글 포함 최대 30개 포스트 처리
         """
-        logger.debug(f"Starting to scrape blog: {blog_id}")
+        logger.debug(f"블로그 스크래핑 시작: {blog_id}")
         
         posts = []
         lognos = self._get_all_post_ids(blog_id)
         
         if not lognos:
-            logger.warning("No post IDs found")
-            # 테스트를 위한 기본 데이터 (네이버 공식 블로그의 일반적인 포스트 ID)
-            lognos = ["223798947", "223751081", "223740290", "223734310", "223699878"]
-            logger.debug("포스트 ID를 찾을 수 없어 기본 테스트 데이터를 사용합니다")
+            logger.warning("포스트 ID를 찾을 수 없습니다")
+            return []
         
         # 최대 30개의 포스트만 처리
         lognos = lognos[:30]
-        logger.debug(f"Found {len(lognos)} post IDs, limited to 30: {lognos}")
+        logger.debug(f"포스트 ID {len(lognos)}개 발견 (최대 30개): {lognos}")
         
         # 각 포스트 내용 가져오기
+        successful_count = 0
+        private_count = 0
+        
         for logno in lognos:
             try:
                 post = self._get_post_content(blog_id, logno)
                 if post:
                     posts.append(post)
+                    successful_count += 1
+                    
+                    # 비공개 글 확인
+                    if post.get('is_private', False):
+                        private_count += 1
+                        logger.debug(f"비공개 글 발견: {logno}")
+                    
                     # 네이버 서버에 부담을 주지 않기 위한 지연
-                    time.sleep(0.2)  # 지연 시간 단축
+                    time.sleep(0.2)
             except Exception as e:
-                logger.error(f"Error scraping post {logno}: {str(e)}")
+                logger.error(f"포스트 {logno} 스크래핑 중 오류: {str(e)}")
         
-        # 포스트를 가져오지 못한 경우를 대비한 기본 데이터
-        if not posts:
-            logger.debug("포스트 콘텐츠를 가져오지 못했습니다. 기본 테스트 데이터를 사용합니다.")
-            posts = [{
-                'logNo': '223798947',
-                'title': '네이버 블로그 포스트 예시',
-                'content': '이 포스트는 테스트를 위한 것입니다. 블로그 분석을 위한 충분한 텍스트를 제공합니다. 이 텍스트는 사용자의 성격, 특징, 강점 및 약점을 분석하는 데 사용됩니다. 블로그를 작성할 때 사용자는 자신의 생각과 의견을 표현합니다. 이를 통해 사용자의 의사결정 방식과 사고 패턴을 파악할 수 있습니다. 실제 블로그 포스트를 통해 사용자의 개인적인 특성이 드러납니다. 자신의 일상, 관심사, 생각을 기록하면서 그들의 가치관, 취향, 성격이 자연스럽게 표현됩니다. 이러한 패턴을 분석하면 사용자에 대한 통찰력을 얻을 수 있습니다.',
-                'date': '2023-05-01',
-                'is_private': False,
-                'url': f"https://blog.naver.com/{blog_id}/223798947"
-            }]
+        # 스크래핑 결과 요약
+        logger.debug(f"총 {successful_count}개 포스트 스크래핑 완료 (비공개글: {private_count}개)")
         
-        return posts
+        # 포스트 유효성 검사
+        valid_posts = []
+        for post in posts:
+            # 최소한의 내용이 있는 포스트만 포함
+            if post.get('content') and len(post.get('content', '')) > 50:
+                valid_posts.append(post)
+            else:
+                logger.warning(f"내용이 부족한 포스트 제외: {post.get('logNo')}")
+        
+        logger.debug(f"유효한 포스트 {len(valid_posts)}개, 내용 부족 포스트 {len(posts) - len(valid_posts)}개")
+        
+        return valid_posts
     
     def _get_all_post_ids(self, blog_id):
         """
@@ -353,152 +363,326 @@ class NaverOAuthScraper:
     
     def _get_post_content(self, blog_id, logno):
         """
-        포스트 내용 가져오기
+        포스트 내용 가져오기 - 비공개 글 접근 강화
         """
         try:
-            # 1. API로 시도
-            api_url = f"https://blog.naver.com/api/blogs/{blog_id}/posts/{logno}"
-            response = self.session.get(api_url)
+            logger.debug(f"포스트 내용 가져오기 시작: {blog_id}/{logno}")
             
-            if response.status_code == 200:
-                data = response.json()
-                if 'result' in data:
-                    result = data['result']
-                    # HTML 콘텐츠 정제
-                    html_content = result.get('contentHtml', '')
-                    soup = BeautifulSoup(html_content, 'html.parser')
+            # 비공개 글 감지 변수
+            is_private = False
+            post_data = None
+            
+            # 1. 신규 API 엔드포인트 시도 (최신 네이버 블로그)
+            try:
+                logger.debug("API 방식으로 시도")
+                api_url = f"https://blog.naver.com/api/blogs/{blog_id}/posts/{logno}"
+                response = self.session.get(api_url, timeout=30)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    if 'result' in data:
+                        logger.debug("API 접근 성공")
+                        result = data['result']
+                        # 비공개 상태 확인
+                        is_private = not result.get('openType', True)
+                        
+                        # HTML 콘텐츠 정제
+                        html_content = result.get('contentHtml', '')
+                        soup = BeautifulSoup(html_content, 'html.parser')
+                        
+                        # 불필요한 UI 요소 제거
+                        exclude_classes = [
+                            'btn_area', 'social_area', 'like_area', 'btn_share',
+                            'font_size_control', 'tool_area', 'tag_area', 'layer_post',
+                            'category_area', 'url_area', 'btn_like', 'writer_info',
+                            'comment_area', 'footer_area', 'area_sympathy', 'post_menu'
+                        ]
+                        
+                        for exclude_class in exclude_classes:
+                            for element in soup.select(f'.{exclude_class}'):
+                                element.decompose()
+                        
+                        # 내용 추출 (p 태그 중심)
+                        content_parts = []
+                        for p_tag in soup.select('p'):
+                            text = p_tag.get_text(strip=True)
+                            if text and len(text) > 20:  # 의미있는 텍스트만 포함
+                                content_parts.append(text)
+                        
+                        # p 태그에서 충분한 내용을 찾지 못한 경우 전체 내용 사용
+                        content = '\n\n'.join(content_parts) if content_parts else soup.get_text(separator='\n', strip=True)
+                        
+                        post_data = {
+                            'logNo': logno,
+                            'title': result.get('title', '제목 없음'),
+                            'content': content,
+                            'date': result.get('addDate', ''),
+                            'is_private': is_private,
+                            'url': f"https://blog.naver.com/{blog_id}/{logno}"
+                        }
+                        logger.debug(f"API에서 포스트 데이터 획득: {post_data['title'][:30]}...")
+            except Exception as e:
+                logger.error(f"API 방식 실패: {str(e)}")
+            
+            # 2. 모바일 웹 시도 (API 실패 또는 결과 없을 때)
+            if not post_data:
+                try:
+                    logger.debug("모바일 웹 방식으로 시도")
+                    # 모바일 쿠키 강화
+                    token_prefix = self.access_token[:16]
+                    token_suffix = self.access_token[-16:]
+                    self.session.cookies.set('NID_AUT', token_prefix, domain='.m.blog.naver.com', path='/')
+                    self.session.cookies.set('NID_SES', token_suffix, domain='.m.blog.naver.com', path='/')
                     
-                    # 불필요한 UI 요소 제거
-                    exclude_classes = [
-                        'btn_area', 'social_area', 'like_area', 'btn_share',
-                        'font_size_control', 'tool_area', 'tag_area', 'layer_post',
-                        'category_area', 'url_area', 'btn_like', 'writer_info',
-                        'comment_area', 'footer_area', 'area_sympathy', 'post_menu'
-                    ]
+                    # 모바일 버전 접근 (더 단순한 레이아웃)
+                    url = f"https://m.blog.naver.com/PostView.naver?blogId={blog_id}&logNo={logno}"
+                    response = self.session.get(url, timeout=30)
                     
-                    for exclude_class in exclude_classes:
-                        for element in soup.select(f'.{exclude_class}'):
-                            element.decompose()
+                    if response.status_code == 200:
+                        logger.debug("모바일 웹 페이지 로드 성공")
+                        soup = BeautifulSoup(response.text, 'html.parser')
+                        
+                        # 접근 제한 확인
+                        page_text = soup.get_text()
+                        if "권한이 없습니다" in page_text or "로그인이 필요합니다" in page_text:
+                            logger.warning(f"모바일 페이지 접근 제한: 포스트 {logno}")
+                            is_private = True
+                        
+                        # 제목 추출 (선택자 확장)
+                        title = ""
+                        title_selectors = [
+                            '.se_title', '.tit_h3', '.tit_view', 'h2.tit',
+                            '.se-title-text', '.post_title', '.se-module-text',
+                            '.se-title', '.tit_h3', '.se_textarea', '.pcol1', 
+                            'h3.tit_view', 'div.tit_post', '.view_post_tit h2'
+                        ]
+                        
+                        for selector in title_selectors:
+                            title_elem = soup.select_one(selector)
+                            if title_elem:
+                                title = title_elem.get_text(strip=True)
+                                if title:
+                                    logger.debug(f"제목 찾음: {title[:30]}...")
+                                    break
+                        
+                        # 불필요한 UI 요소 제거
+                        for exclude_class in exclude_classes:
+                            for element in soup.select(f'.{exclude_class}'):
+                                element.decompose()
+                        
+                        # 내용 추출 (더 정밀한 선택자 사용)
+                        content_selectors = [
+                            '.se-main-container p', '.se_doc_viewer p', '.view p', 
+                            '.post_ct p', '.post_view p', '.post_content p',
+                            '.se-text-paragraph', '.se_paragraph', '.se-module-text',
+                            '.post_ct', '.se-module-text-paragraph', 'div.se-module-text'
+                        ]
+                        
+                        content = ""
+                        # 의미있는 콘텐츠 추출 시도
+                        for selector in content_selectors:
+                            content_elems = soup.select(selector)
+                            if content_elems:
+                                content_parts = []
+                                for elem in content_elems:
+                                    text = elem.get_text(strip=True)
+                                    if text and len(text) > 20:  # 의미있는 텍스트만 포함
+                                        content_parts.append(text)
+                                
+                                if content_parts:
+                                    content = '\n\n'.join(content_parts)
+                                    logger.debug(f"내용 찾음: {len(content)} 자")
+                                    break
+                        
+                        # 백업 방법: 여전히 내용이 없으면 컨테이너 전체 추출
+                        if not content:
+                            fallback_selectors = [
+                                '.se-main-container', '.view', '.post_ct', '.post_content',
+                                '.se_component_wrap', '.se_viewArea', '.post_cont',
+                                '#viewTypeSelector', '.se_doc_viewer', '#postViewArea'
+                            ]
+                            for selector in fallback_selectors:
+                                content_elem = soup.select_one(selector)
+                                if content_elem:
+                                    # 불필요한 요소 제거
+                                    for exclude in ['script', 'style', '.link_post', '.btn_area']:
+                                        for elem in content_elem.select(exclude):
+                                            elem.decompose()
+                                    
+                                    content = content_elem.get_text(separator='\n', strip=True)
+                                    if content:
+                                        logger.debug(f"내용 찾음 (백업 방법): {len(content)} 자")
+                                        break
+                        
+                        # 날짜 추출
+                        date = ""
+                        date_selectors = [
+                            '.se_publishDate', '.date', '.se_date', 
+                            '.post_date', '.date_post', '.se-module-date'
+                        ]
+                        
+                        for selector in date_selectors:
+                            date_elem = soup.select_one(selector)
+                            if date_elem:
+                                date = date_elem.get_text(strip=True).replace('작성일', '').strip()
+                                if date:
+                                    break
+                        
+                        # 비공개 여부 확인
+                        if "비공개" in page_text or "private" in page_text.lower():
+                            is_private = True
+                        
+                        if title or content:
+                            post_data = {
+                                'logNo': logno,
+                                'title': title or '제목 없음',
+                                'content': content,
+                                'date': date,
+                                'is_private': is_private,
+                                'url': f"https://blog.naver.com/{blog_id}/{logno}"
+                            }
+                            logger.debug(f"모바일 웹에서 포스트 데이터 획득: {title[:30]}...")
+                except Exception as e:
+                    logger.error(f"모바일 웹 방식 실패: {str(e)}")
+            
+            # 3. PC 웹 페이지 시도 (최후의 수단)
+            if not post_data:
+                try:
+                    logger.debug("PC 웹 방식으로 시도")
+                    # PC 쿠키 강화
+                    token_prefix = self.access_token[:16]
+                    token_suffix = self.access_token[-16:]
+                    self.session.cookies.set('NID_AUT', token_prefix, domain='.blog.naver.com', path='/')
+                    self.session.cookies.set('NID_SES', token_suffix, domain='.blog.naver.com', path='/')
                     
-                    # 내용 추출 (p 태그 중심)
-                    content_parts = []
-                    for p_tag in soup.select('p'):
-                        text = p_tag.get_text(strip=True)
-                        if text and len(text) > 20:  # 의미있는 텍스트만 포함
-                            content_parts.append(text)
+                    # PC 버전 접근 (직접 URL)
+                    url = f"https://blog.naver.com/{blog_id}/{logno}"
+                    response = self.session.get(url, timeout=30)
                     
-                    # p 태그에서 충분한 내용을 찾지 못한 경우 전체 내용 사용
-                    content = '\n\n'.join(content_parts) if content_parts else soup.get_text(separator='\n', strip=True)
-                    
-                    return {
-                        'logNo': logno,
-                        'title': result.get('title', ''),
-                        'content': content,
-                        'date': result.get('addDate', ''),
-                        'is_private': not result.get('openType', True),
-                        'url': f"https://blog.naver.com/{blog_id}/{logno}"
-                    }
+                    if response.status_code == 200:
+                        logger.debug("PC 웹 페이지 로드 성공")
+                        soup = BeautifulSoup(response.text, 'html.parser')
+                        
+                        # 아이프레임 체크 (네이버 블로그는 종종 iframe에 컨텐츠를 로드)
+                        iframe = soup.select_one('iframe#mainFrame')
+                        if iframe:
+                            iframe_src = iframe.get('src')
+                            if iframe_src:
+                                # iframe_src가 http로 시작하지 않으면 도메인 추가
+                                if iframe_src.startswith('/'):
+                                    iframe_src = f"https://blog.naver.com{iframe_src}"
+                                elif not iframe_src.startswith('http'):
+                                    iframe_src = f"https://blog.naver.com/{iframe_src}"
+                                
+                                logger.debug(f"아이프레임 감지: {iframe_src}")
+                                try:
+                                    iframe_response = self.session.get(iframe_src, timeout=30)
+                                    if iframe_response.status_code == 200:
+                                        soup = BeautifulSoup(iframe_response.text, 'html.parser')
+                                        logger.debug("아이프레임 내용 로드 성공")
+                                except Exception as iframe_error:
+                                    logger.error(f"아이프레임 로드 실패: {str(iframe_error)}")
+                        
+                        # 접근 제한 확인
+                        page_text = soup.get_text()
+                        if "권한이 없습니다" in page_text or "로그인이 필요합니다" in page_text:
+                            logger.warning(f"PC 페이지 접근 제한: 포스트 {logno}")
+                            is_private = True
+                        
+                        # 제목 추출
+                        title = ""
+                        title_selectors = [
+                            'div.se-title-text span', 'div.htitle', 'span.pcol1', 
+                            'h3.se_textarea', 'div.pcol1', '.se-module-text', 
+                            'h3.title', '.tit_h3', '.tit_snv1', '.pcol2'
+                        ]
+                        
+                        for selector in title_selectors:
+                            title_elem = soup.select_one(selector)
+                            if title_elem:
+                                title = title_elem.get_text(strip=True)
+                                if title:
+                                    logger.debug(f"제목 찾음 (PC): {title[:30]}...")
+                                    break
+                        
+                        # 내용 추출
+                        content_selectors = [
+                            'div.se-main-container', 'div#post-view', 'div.post-view',
+                            'div.post_content', 'div.se_doc_viewer', '.se-module-text-paragraph'
+                        ]
+                        
+                        content = ""
+                        for selector in content_selectors:
+                            content_elems = soup.select(selector)
+                            if content_elems:
+                                content_parts = []
+                                for elem in content_elems:
+                                    # 불필요한 요소 제거
+                                    for exclude in ['script', 'style', '.comment_area', '.btn_area']:
+                                        for e in elem.select(exclude):
+                                            e.decompose()
+                                    
+                                    # 의미있는 텍스트 추출
+                                    text = elem.get_text(strip=True)
+                                    if text and len(text) > 20:
+                                        content_parts.append(text)
+                                
+                                if content_parts:
+                                    content = '\n\n'.join(content_parts)
+                                    logger.debug(f"내용 찾음 (PC): {len(content)} 자")
+                                    break
+                        
+                        # 콘텐츠가 없으면 전체 컨테이너 시도
+                        if not content:
+                            for selector in content_selectors:
+                                content_elem = soup.select_one(selector)
+                                if content_elem:
+                                    # 불필요한 요소 제거
+                                    for exclude in ['script', 'style', '.comment_area', '.btn_area']:
+                                        for e in content_elem.select(exclude):
+                                            e.decompose()
+                                    
+                                    content = content_elem.get_text(separator='\n', strip=True)
+                                    if content:
+                                        logger.debug(f"내용 전체 찾음 (PC): {len(content)} 자")
+                                        break
+                        
+                        # 날짜 추출
+                        date = ""
+                        date_selectors = [
+                            '.se_publishDate', '.date', '.se_date', '.pub_date', 
+                            '.se-module-date', '.se-date', '.blog2_container .se_date'
+                        ]
+                        
+                        for selector in date_selectors:
+                            date_elem = soup.select_one(selector)
+                            if date_elem:
+                                date = date_elem.get_text(strip=True).replace('작성일', '').strip()
+                                if date:
+                                    break
+                        
+                        if title or content:
+                            post_data = {
+                                'logNo': logno,
+                                'title': title or '제목 없음',
+                                'content': content,
+                                'date': date,
+                                'is_private': is_private,
+                                'url': f"https://blog.naver.com/{blog_id}/{logno}"
+                            }
+                            logger.debug(f"PC 웹에서 포스트 데이터 획득: {title[:30]}...")
+                except Exception as e:
+                    logger.error(f"PC 웹 방식 실패: {str(e)}")
             
-            # 2. HTML로 시도
-            # 모바일 버전이 더 단순한 레이아웃
-            url = f"https://m.blog.naver.com/PostView.naver?blogId={blog_id}&logNo={logno}"
-            response = self.session.get(url)
+            # 결과 반환
+            if post_data:
+                return post_data
             
-            if response.status_code != 200:
-                logger.warning(f"Failed to fetch post {logno}")
-                return None
-            
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            # 제목 추출
-            title = ""
-            title_selectors = [
-                '.se_title', '.tit_h3', '.tit_view', 'h2.tit',
-                '.se-title-text', '.post_title'
-            ]
-            
-            for selector in title_selectors:
-                title_elem = soup.select_one(selector)
-                if title_elem:
-                    title = title_elem.get_text(strip=True)
-                    if title:
-                        break
-            
-            # 불필요한 UI 요소 제거
-            exclude_classes = [
-                'btn_area', 'social_area', 'like_area', 'btn_share',
-                'font_size_control', 'tool_area', 'tag_area', 'layer_post',
-                'category_area', 'url_area', 'btn_like', 'writer_info',
-                'comment_area', 'footer_area', 'area_sympathy', 'post_menu'
-            ]
-            
-            for exclude_class in exclude_classes:
-                for element in soup.select(f'.{exclude_class}'):
-                    element.decompose()
-            
-            # 내용 추출 (더 정밀한 선택자 사용)
-            content_selectors = [
-                '.se-main-container p', '.se_doc_viewer p', '.view p', 
-                '.post_ct p', '.post_view p', '.post_content p',
-                '.se-text-paragraph', '.se_paragraph'
-            ]
-            
-            content = ""
-            # 의미있는 콘텐츠 추출 시도
-            for selector in content_selectors:
-                content_elems = soup.select(selector)
-                if content_elems:
-                    content_parts = []
-                    for elem in content_elems:
-                        text = elem.get_text(strip=True)
-                        if text and len(text) > 20:  # 의미있는 텍스트만 포함
-                            content_parts.append(text)
-                    
-                    if content_parts:
-                        content = '\n\n'.join(content_parts)
-                        break
-            
-            # 백업 방법: 여전히 내용이 없으면 기존 방식 시도
-            if not content:
-                fallback_selectors = ['.se-main-container', '.view', '.post_ct', '.post_content']
-                for selector in fallback_selectors:
-                    content_elem = soup.select_one(selector)
-                    if content_elem:
-                        content = content_elem.get_text(separator='\n', strip=True)
-                        if content:
-                            break
-            
-            # 날짜 추출
-            date = ""
-            date_selectors = [
-                '.se_publishDate', '.date', '.se_date', 
-                '.post_date', '.date_post', '.se-module-date'
-            ]
-            
-            for selector in date_selectors:
-                date_elem = soup.select_one(selector)
-                if date_elem:
-                    date = date_elem.get_text(strip=True)
-                    if date:
-                        break
-            
-            # 비공개 여부 확인
-            is_private = "비공개" in soup.get_text() or "private" in soup.get_text().lower()
-            
-            if title or content:
-                return {
-                    'logNo': logno,
-                    'title': title,
-                    'content': content,
-                    'date': date,
-                    'is_private': is_private,
-                    'url': f"https://blog.naver.com/{blog_id}/{logno}"
-                }
-            
+            logger.warning(f"모든 방법으로 포스트 {logno} 콘텐츠를 가져오지 못했습니다")
             return None
             
         except Exception as e:
-            logger.error(f"Error getting post content for {logno}: {str(e)}")
+            logger.error(f"포스트 {logno} 내용 가져오기 실패: {str(e)}")
             return None
 
 
