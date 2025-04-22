@@ -60,25 +60,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
-    // 기존 블로그 폼 핸들링(쿠키 방식용)
-    const blogForm = document.getElementById('blog-form');
-    if (blogForm) {
-        blogForm.addEventListener('submit', function(e) {
-            // Show loading state
-            document.getElementById('form-container').classList.add('d-none');
-            document.getElementById('loading-container').classList.remove('d-none');
-            
-            // Form will be submitted normally
-        });
-    }
-    
-    // Show cookie info
-    const cookieInfoBtn = document.getElementById('cookie-info-btn');
-    if (cookieInfoBtn) {
-        cookieInfoBtn.addEventListener('click', function() {
-            showCookieInstructions();
-        });
-    }
+    // 쿠키 방식 제거됨
     
     // Handle copying text to clipboard
     const copyBtns = document.querySelectorAll('.copy-btn');
@@ -112,55 +94,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
-// Function to show cookie instructions
-function showCookieInstructions() {
-    const modalHtml = `
-    <div class="modal fade" id="cookieInstructionsModal" tabindex="-1" aria-labelledby="cookieInstructionsModalLabel" aria-hidden="true">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="cookieInstructionsModalLabel">How to Get Your Naver Cookie Value</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    <div class="alert alert-info">
-                        Follow these steps to get the cookie value needed to access your Naver blog:
-                    </div>
-                    <ol class="list-group list-group-numbered mb-3">
-                        <li class="list-group-item">Log in to your Naver account</li>
-                        <li class="list-group-item">Open your browser's developer tools (F12 or right-click → Inspect)</li>
-                        <li class="list-group-item">Go to the "Network" tab</li>
-                        <li class="list-group-item">Navigate to your Naver blog or refresh the page</li>
-                        <li class="list-group-item">Click on any request to naver.com</li>
-                        <li class="list-group-item">Look for "Request Headers" and find the "Cookie" header</li>
-                        <li class="list-group-item">Copy the entire cookie string value</li>
-                    </ol>
-                    <div class="alert alert-warning">
-                        <strong>Important:</strong> Your cookie value contains sensitive information. This tool only uses it to access your blog content and does not store the cookie value.
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                </div>
-            </div>
-        </div>
-    </div>
-    `;
-    
-    // Append modal to body
-    const modalContainer = document.createElement('div');
-    modalContainer.innerHTML = modalHtml;
-    document.body.appendChild(modalContainer);
-    
-    // Show the modal
-    const modal = new bootstrap.Modal(document.getElementById('cookieInstructionsModal'));
-    modal.show();
-    
-    // Clean up when modal is hidden
-    document.getElementById('cookieInstructionsModal').addEventListener('hidden.bs.modal', function() {
-        document.body.removeChild(modalContainer);
-    });
-}
+// 쿠키 방식 제거됨 - 관련 함수 삭제
 
 // Function to copy text to clipboard
 function copyToClipboard(text) {

@@ -49,7 +49,7 @@ with app.app_context():
     from models import User, Blog, BlogPost, Report
     db.create_all()
 
-from scraper import scrape_naver_blog
+from scraper import extract_blog_id
 from analyzer import analyze_blog_content
 from oauth_handler import get_authorization_url, get_token_from_code, get_user_info
 from oauth_scraper import scrape_blog_with_oauth
