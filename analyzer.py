@@ -158,16 +158,7 @@ def create_default_analysis_result(content):
 지속적인 자기 인식과 성찰을 통해 자신의 강점, 약점, 사고 패턴, 편향을 더 깊이 이해하세요. 이런 인식은 의도적인 성장과 발전의 기반이 됩니다. 자신의 강점을 최대한 활용하되, 약점과 편향에 대해서도 열린 태도로 지속적인 개선을 추구하세요. 모든 측면에서 완벽함을 추구하기보다는 균형 잡힌 발전을 목표로 하는 것이 중요합니다. 다양한 사람들과 관점에 지속적으로 노출되는 환경을 의도적으로 조성하세요. 이는 시야를 넓히고, 편향을 줄이며, 더 풍부하고 균형 잡힌 이해를 발전시키는 데 도움이 됩니다. 자신의 성장과 발전을 장기적인 여정으로 바라보고, 작은 개선과 진전을 인정하고 축하하세요. 변화는 점진적으로 일어나며, 지속적인 노력과 인내가 중요합니다.
     """
     
-    return {
-        "characteristics": characteristics.strip(),
-        "strengths": strengths.strip(),
-        "weaknesses": weaknesses.strip(),
-        "thinking_patterns": thinking_patterns.strip(),
-        "decision_making": decision_making.strip(),
-        "unconscious_biases": unconscious_biases.strip(),
-        "advice": advice.strip()
-    }
-    
+    # 결과 반환 (중복된 return 문 제거)
     return {
         "characteristics": characteristics.strip(),
         "strengths": strengths.strip(),
@@ -247,6 +238,7 @@ def analyze_blog_content(content):
             retry_count = 0
             retry_delay = 10  # 초 단위
             last_error = None
+            response = None  # 변수 초기화하여 경고 방지
             
             while retry_count < max_retries:
                 try:
@@ -281,8 +273,8 @@ def analyze_blog_content(content):
                         time.sleep(retry_delay)
                     
             # 모든 재시도 후에도 실패하면 기본값 반환
-            if retry_count == max_retries:
-                logger.error(f"OpenAI API 최대 재시도 횟수 초과, 기본 분석 결과 반환: {str(last_error)}")
+            if retry_count == max_retries or response is None:
+                logger.error(f"OpenAI API 최대 재시도 횟수 초과 또는 응답이 없음, 기본 분석 결과 반환: {str(last_error)}")
                 return create_default_analysis_result(content)
                 
         except Exception as api_error:
@@ -331,7 +323,11 @@ def analyze_blog_content(content):
             
         except json.JSONDecodeError as e:
             logger.error(f"JSON 파싱 오류: {str(e)}")
-            logger.error(f"원본 응답: {response.choices[0].message.content[:1000]}...")
+            # response가 정의되었는지 확인하고 로그 출력
+            if response and hasattr(response, 'choices') and response.choices:
+                logger.error(f"원본 응답: {response.choices[0].message.content[:1000]}...")
+            else:
+                logger.error("응답 객체가 없거나 올바른 형식이 아닙니다.")
             # 기본 분석 결과 반환
             return create_default_analysis_result(content)
         
