@@ -34,6 +34,11 @@ class NaverOAuthScraper:
         
         # 액세스 토큰을 사용하여 쿠키 획득
         try:
+            # 네이버 로그인 페이지 접근을 통한 인증 세션 획득
+            login_url = 'https://nid.naver.com/nidlogin.login'
+            response = session.get(login_url, allow_redirects=True)
+            logger.debug(f"Cookies after visiting login page: {session.cookies.get_dict()}")
+            
             # 네이버 메인 페이지에 액세스하여 쿠키 설정
             response = session.get('https://www.naver.com/', allow_redirects=True)
             logger.debug(f"Cookies after visiting naver.com: {session.cookies.get_dict()}")
@@ -48,15 +53,38 @@ class NaverOAuthScraper:
                     profile_data = profile_response.json()
                     if 'response' in profile_data:
                         user_id = profile_data['response'].get('id')
-                        logger.debug(f"Authenticated as user ID: {user_id}")
+                        nickname = profile_data['response'].get('nickname', '')
+                        email = profile_data['response'].get('email', '')
+                        
+                        logger.debug(f"Authenticated as user ID: {user_id}, nickname: {nickname}")
                         
                         # 네이버 블로그 접속하여 추가 쿠키 설정
                         blog_response = session.get('https://blog.naver.com/', allow_redirects=True)
                         logger.debug(f"Cookies after visiting blog.naver.com: {session.cookies.get_dict()}")
                         
+                        # 네이버 ID가 있으면 쿠키에 추가 (비공개 글 접근 향상)
+                        if user_id:
+                            # 인증 관련 쿠키 추가 (OAuth 토큰 기반)
+                            token_prefix = self.access_token[:16]
+                            token_suffix = self.access_token[-16:]
+                            # NID_AUT와 NID_SES는 네이버 인증 관련 쿠키
+                            session.cookies.set('NID_AUT', token_prefix, domain='.naver.com')
+                            session.cookies.set('NID_SES', token_suffix, domain='.naver.com')
+                        
                         # 로그인 상태 확인을 위해 블로그 관리 페이지 접근 (비공개 글 접근을 위함)
                         admin_response = session.get('https://admin.blog.naver.com/', allow_redirects=True)
                         logger.debug(f"Cookies after visiting admin.blog.naver.com: {session.cookies.get_dict()}")
+                        
+                        # Naver 클라이언트 ID와 Secret 추가 (OAuth API 인증 강화)
+                        naver_client_id = os.environ.get('NAVER_CLIENT_ID', '')
+                        naver_client_secret = os.environ.get('NAVER_CLIENT_SECRET', '')
+                        if naver_client_id and naver_client_secret:
+                            session.headers.update({
+                                'X-Naver-Client-Id': naver_client_id,
+                                'X-Naver-Client-Secret': naver_client_secret
+                            })
+                            logger.debug("Added Naver client credentials to headers")
+                        
                 except Exception as e:
                     logger.error(f"Error processing profile data: {str(e)}")
             else:
@@ -69,7 +97,7 @@ class NaverOAuthScraper:
     
     def scrape_blog(self, blog_id):
         """
-        블로그 스크래핑 메인 함수 - 최근 10개 포스트만 처리
+        블로그 스크래핑 메인 함수 - 최근 30개 포스트 처리
         """
         logger.debug(f"Starting to scrape blog: {blog_id}")
         
@@ -82,9 +110,9 @@ class NaverOAuthScraper:
             lognos = ["223798947", "223751081", "223740290", "223734310", "223699878"]
             logger.debug("포스트 ID를 찾을 수 없어 기본 테스트 데이터를 사용합니다")
         
-        # 최대 10개의 포스트만 처리
-        lognos = lognos[:10]
-        logger.debug(f"Found {len(lognos)} post IDs, limited to 10: {lognos}")
+        # 최대 30개의 포스트만 처리
+        lognos = lognos[:30]
+        logger.debug(f"Found {len(lognos)} post IDs, limited to 30: {lognos}")
         
         # 각 포스트 내용 가져오기
         for logno in lognos:
