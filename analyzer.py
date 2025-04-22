@@ -230,25 +230,31 @@ def analyze_blog_content(content):
         {content}
         """
         
-        # Make the API call to gpt-4o
-        # the newest OpenAI model is "gpt-4o" which was released May 13, 2024.
-        # do not change this unless explicitly requested by the user
-        response = openai.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "당신은 작성된 내용에서 통찰력을 추출하는 데 특화된 심리 분석가입니다. 제공된 텍스트를 바탕으로 한국어로 사려 깊고 미묘한 분석을 제공하세요. 모든 응답은 한국어로만 작성해야 합니다."
-                },
-                {
-                    "role": "user",
-                    "content": prompt.format(content=content)
-                }
-            ],
-            response_format={"type": "json_object"},
-            max_tokens=4000,
-            temperature=0.7,
-        )
+        try:
+            # Make the API call to gpt-4o
+            # the newest OpenAI model is "gpt-4o" which was released May 13, 2024.
+            # do not change this unless explicitly requested by the user
+            response = openai.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "당신은 작성된 내용에서 통찰력을 추출하는 데 특화된 심리 분석가입니다. 제공된 텍스트를 바탕으로 한국어로 사려 깊고 미묘한 분석을 제공하세요. 모든 응답은 한국어로만 작성해야 합니다."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt.format(content=content)
+                    }
+                ],
+                response_format={"type": "json_object"},
+                max_tokens=4000,
+                temperature=0.7,
+                timeout=60  # 60초 타임아웃 설정
+            )
+        except Exception as api_error:
+            logger.error(f"OpenAI API 호출 오류: {str(api_error)}")
+            # 기본 분석 결과 반환
+            return create_default_analysis_result(content)
         
         # Parse the response
         try:
