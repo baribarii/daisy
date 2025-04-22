@@ -36,11 +36,29 @@ class NaverOAuthScraper:
         try:
             # 네이버 메인 페이지에 액세스하여 쿠키 설정
             response = session.get('https://www.naver.com/', allow_redirects=True)
+            logger.debug(f"Cookies after visiting naver.com: {session.cookies.get_dict()}")
             
             # OAuth 프로필 API 호출
             profile_response = session.get('https://openapi.naver.com/v1/nid/me')
             if profile_response.status_code == 200:
                 logger.debug("Successfully authenticated with OAuth token")
+                
+                # 프로필 정보에서 사용자 ID 추출
+                try:
+                    profile_data = profile_response.json()
+                    if 'response' in profile_data:
+                        user_id = profile_data['response'].get('id')
+                        logger.debug(f"Authenticated as user ID: {user_id}")
+                        
+                        # 네이버 블로그 접속하여 추가 쿠키 설정
+                        blog_response = session.get('https://blog.naver.com/', allow_redirects=True)
+                        logger.debug(f"Cookies after visiting blog.naver.com: {session.cookies.get_dict()}")
+                        
+                        # 로그인 상태 확인을 위해 블로그 관리 페이지 접근 (비공개 글 접근을 위함)
+                        admin_response = session.get('https://admin.blog.naver.com/', allow_redirects=True)
+                        logger.debug(f"Cookies after visiting admin.blog.naver.com: {session.cookies.get_dict()}")
+                except Exception as e:
+                    logger.error(f"Error processing profile data: {str(e)}")
             else:
                 logger.warning(f"OAuth profile API call failed: {profile_response.status_code}")
                 
