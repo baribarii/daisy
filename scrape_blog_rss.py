@@ -1,11 +1,136 @@
 import logging
 import time
+import json
+import re
 import requests
 from bs4 import BeautifulSoup
 from blog_utils import extract_blog_id
 
 # 로깅 설정
 logger = logging.getLogger(__name__)
+
+def fetch_rss_lognos(blog_id):
+    """
+    RSS 피드에서 포스트 ID(logNo) 목록만 가져옵니다.
+    
+    Args:
+        blog_id (str): 블로그 ID
+        
+    Returns:
+        list: logNo 목록 (최대 100개)
+    """
+    try:
+        # RSS URL 구성
+        rss_url = f"https://rss.blog.naver.com/{blog_id}.xml"
+        logger.debug(f"RSS URL: {rss_url}")
+        
+        # 재시도 로직
+        max_retries = 2
+        retry_count = 0
+        response = None
+        
+        # 일반 세션으로 충분함
+        session = requests.Session()
+        
+        while retry_count <= max_retries:
+            try:
+                logger.debug(f"RSS 요청 시도 {retry_count+1}/{max_retries+1}")
+                response = session.get(rss_url, timeout=5)
+                if response.status_code == 200:
+                    break
+            except Exception as retry_error:
+                logger.warning(f"RSS 요청 재시도 {retry_count+1}/{max_retries+1}: {str(retry_error)}")
+            
+            retry_count += 1
+            time.sleep(1)  # backoff
+        
+        if not response or response.status_code != 200:
+            logger.error(f"RSS 응답 오류: {response.status_code if response else 'No response'}")
+            return []
+        
+        # logNo 목록 추출
+        log_nos = []
+        
+        # XML 파싱 시도
+        try:
+            soup = BeautifulSoup(response.content, 'xml')
+            
+            # RSS 구조 확인
+            if soup and soup.find('rss'):
+                # <item> 태그 찾기
+                items = soup.find_all('item')
+                
+                for item in items:
+                    # <guid> 태그에서 logNo 추출
+                    guid = item.find('guid')
+                    log_no = None
+                    
+                    if guid and guid.text:
+                        guid_url = guid.text.strip()
+                        # 형식: https://blog.naver.com/[blogId]/[logNo]
+                        if f'/{blog_id}/' in guid_url:
+                            log_no = guid_url.split(f'/{blog_id}/')[1].split('?')[0].strip()
+                    
+                    if not log_no:
+                        # <link> 태그에서 추출 시도
+                        link = item.find('link')
+                        if link and link.text:
+                            link_url = link.text.strip()
+                            if 'logNo=' in link_url:
+                                log_no = link_url.split('logNo=')[1].split('&')[0].strip()
+                    
+                    if log_no and log_no.isdigit() and log_no not in log_nos:
+                        log_nos.append(log_no)
+                        
+                        # 최대 100개 제한
+                        if len(log_nos) >= 100:
+                            break
+        except Exception as xml_error:
+            logger.error(f"XML 파싱 오류: {str(xml_error)}")
+        
+        # 결과가 없으면 HTML 파싱 시도
+        if not log_nos:
+            try:
+                soup = BeautifulSoup(response.text, 'html.parser')
+                links = soup.find_all('a', href=True)
+                
+                for link in links:
+                    href = link['href']
+                    
+                    # /blogId/logNo 패턴 찾기
+                    if f'/{blog_id}/' in href:
+                        try:
+                            log_no = href.split(f'/{blog_id}/')[1].split('?')[0]
+                            if log_no.isdigit() and log_no not in log_nos:
+                                log_nos.append(log_no)
+                                
+                                # 최대 100개 제한
+                                if len(log_nos) >= 100:
+                                    break
+                        except:
+                            continue
+                    
+                    # logNo= 파라미터 찾기
+                    elif 'logNo=' in href:
+                        try:
+                            log_no = href.split('logNo=')[1].split('&')[0]
+                            if log_no.isdigit() and log_no not in log_nos:
+                                log_nos.append(log_no)
+                                
+                                # 최대 100개 제한
+                                if len(log_nos) >= 100:
+                                    break
+                        except:
+                            continue
+            except Exception as html_error:
+                logger.error(f"HTML 파싱 오류: {str(html_error)}")
+        
+        logger.debug(f"RSS에서 {len(log_nos)}개의 logNo 발견")
+        return log_nos
+        
+    except Exception as e:
+        logger.error(f"RSS logNo 추출 오류: {str(e)}")
+        return []
 
 def scrape_blog_rss_mode(blog_url, access_token=None):
     """
@@ -23,114 +148,40 @@ def scrape_blog_rss_mode(blog_url, access_token=None):
         blog_id = extract_blog_id(blog_url)
         logger.debug(f"블로그 ID 추출: {blog_id}")
         
-        # RSS 피드 URL
-        rss_url = f"https://rss.blog.naver.com/{blog_id}.xml"
+        # RSS 피드에서 logNo 목록 가져오기
+        log_nos = fetch_rss_lognos(blog_id)
         
-        # RSS 피드 가져오기
-        response = requests.get(rss_url, timeout=30)
-        
-        if response.status_code != 200:
-            logger.error(f"RSS 피드 응답 오류: {response.status_code}")
+        if not log_nos:
+            logger.warning("RSS에서 포스트 ID를 찾을 수 없습니다")
             return []
         
-        # XML 파싱
-        soup = BeautifulSoup(response.text, 'xml')
-        if not soup.find('rss'):
-            # XML 파서가 없는 경우 lxml HTML 파서 사용
-            soup = BeautifulSoup(response.text, 'html.parser')
+        # 세션 생성 - RSS는 OAuth 없이도 가능하지만 접근성을 높이기 위해 토큰 사용
+        session = create_authenticated_session(access_token)
         
-        # 피드 아이템 추출
-        items = soup.find_all('item')
-        logger.debug(f"RSS 피드에서 {len(items)}개 항목 발견")
-        
-        if not items:
-            logger.warning("RSS 피드에서 항목을 찾을 수 없습니다")
-            return []
-        
-        # 각 아이템에서 정보 추출
+        # 포스트 상세 내용 수집
         posts = []
         
-        for item in items:
+        # 최대 30개로 제한
+        if len(log_nos) > 30:
+            logger.debug(f"포스트 수 제한: {len(log_nos)}개 -> 30개")
+            log_nos = log_nos[:30]
+        
+        for log_no in log_nos:
             try:
-                # 필수 정보 추출
-                title_tag = item.find('title')
-                link_tag = item.find('link')
-                desc_tag = item.find('description')
-                date_tag = item.find('pubDate')
-                guid_tag = item.find('guid')
-                
-                if not (title_tag and link_tag):
-                    continue
-                
-                title = title_tag.text
-                link = link_tag.text
-                content = desc_tag.text if desc_tag else ""
-                date = date_tag.text if date_tag else ""
-                
-                # 링크에서 logNo 추출
-                log_no = ""
-                if "logNo=" in link:
-                    log_no = link.split("logNo=")[1].split("&")[0]
-                elif guid_tag:
-                    # GUID에서 logNo 추출 시도
-                    guid = guid_tag.text
-                    if "logNo=" in guid:
-                        log_no = guid.split("logNo=")[1].split("&")[0]
-                
-                # logNo가 없으면 링크에서 패턴 검색
-                if not log_no and f"/{blog_id}/" in link:
-                    parts = link.split(f"/{blog_id}/")[1].split("?")[0].split("/")
-                    for part in parts:
-                        if part.isdigit():
-                            log_no = part
-                            break
-                
-                if log_no and title:
-                    post = {
-                        'logNo': log_no,
-                        'title': title,
-                        'content': clean_html_content(content),
-                        'date': date,
-                        'is_private': False,  # RSS는 공개 글만 포함
-                        'url': link
-                    }
-                    posts.append(post)
-            except Exception as item_error:
-                logger.error(f"RSS 항목 파싱 오류: {str(item_error)}")
+                post_detail = get_post_detail(session, blog_id, log_no)
+                if post_detail:
+                    posts.append(post_detail)
+                    # 서버 부하 방지
+                    time.sleep(0.5)
+            except Exception as post_error:
+                logger.error(f"포스트 {log_no} 처리 중 오류: {str(post_error)}")
                 continue
         
-        # 최대 30개로 제한
-        if len(posts) > 30:
-            logger.debug(f"포스트 수 제한: {len(posts)}개 -> 30개")
-            posts = posts[:30]
-            
-        # 각 포스트 상세 내용 강화 시도
-        if access_token:
-            logger.debug("OAuth 토큰 있음: 상세 내용 강화 시도")
-            session = create_authenticated_session(access_token)
-            
-            for i, post in enumerate(posts):
-                log_no = post.get('logNo')
-                if not log_no or post.get('content'):
-                    continue
-                
-                # 포스트 상세 내용 가져오기
-                try:
-                    post_detail = get_post_detail(session, blog_id, log_no)
-                    if post_detail and post_detail.get('content'):
-                        post['content'] = post_detail.get('content')
-                        if post_detail.get('date'):
-                            post['date'] = post_detail.get('date')
-                except Exception as detail_error:
-                    logger.error(f"상세 내용 강화 오류: {str(detail_error)}")
-                
-                # 서버 부하 방지
-                time.sleep(0.5)
-        
+        logger.debug(f"RSS 모드로 {len(posts)}개의 포스트를 찾았습니다.")
         return posts
-        
+    
     except Exception as e:
-        logger.error(f"RSS 모드 스크래핑 중 오류: {str(e)}")
+        logger.error(f"RSS 스크래핑 중 오류 발생: {str(e)}")
         return []
 
 

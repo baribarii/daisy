@@ -112,131 +112,168 @@ def get_posts_via_admin_api(session, blog_id):
     try:
         # 관리자 페이지 접속 (인증 초기화)
         init_url = f"https://blog.naver.com/{blog_id}"
-        session.get(init_url, timeout=30)
+        session.get(init_url, timeout=5)
         
-        # ManageListAjax 엔드포인트로 게시물 목록 요청
-        ajax_url = f"https://blog.naver.com/PostManageListAjax.naver?blogId={blog_id}"
-        headers = {
-            'Referer': init_url,
-            'X-Requested-With': 'XMLHttpRequest'
-        }
+        # 결과 포스트 목록
+        all_posts = []
+        page = 1
+        max_retries = 2
         
-        response = session.get(
-            ajax_url,
-            headers=headers,
-            params={
-                'blogId': blog_id,
-                'listStatus': 'COMPLETE',  # 발행 완료된 글만
-                'viewDate': 'ALL',  # 전체 기간
-                'categoryNo': 0,    # 전체 카테고리
-                'parentCategoryNo': 0,
-                'sortType': 'DATE', # 날짜순
-                'keyword': '',
-                'property': 'ALL',
-                'page': 1,
-                'countPerPage': 30  # 30개씩
-            },
-            timeout=30
-        )
-        
-        if response.status_code != 200:
-            logger.error(f"관리자 API 응답 오류: {response.status_code}")
-            return []
-        
-        # JSON 응답 파싱
-        try:
-            data = response.json()
-            post_list = data.get('postList', [])
+        # 페이지별로 포스트 수집
+        while True:
+            logger.debug(f"ManageListAjax 페이지 {page} 요청 중...")
             
-            # 필요한 정보 추출
-            posts = []
-            for post_info in post_list:
-                post = {
-                    'logNo': str(post_info.get('logNo', '')),
-                    'title': post_info.get('title', ''),
-                    'date': post_info.get('addDate', ''),
-                    'is_private': post_info.get('openType') != 'PUBLIC',
-                    'url': f"https://blog.naver.com/{blog_id}/{post_info.get('logNo', '')}"
-                }
-                posts.append(post)
-                
-            return posts
+            # ManageListAjax 엔드포인트로 게시물 목록 요청
+            ajax_url = f"https://blog.naver.com/ManageListAjax.naver"
+            headers = {
+                'Referer': init_url,
+                'X-Requested-With': 'XMLHttpRequest'
+            }
             
-        except ValueError:
-            # JSON 파싱 실패 시 HTML로 간주하고 파싱 시도
-            soup = BeautifulSoup(response.text, 'html.parser')
+            retry_count = 0
+            response = None
             
-            # HTML에서 스크립트를 찾아 JSON 데이터 추출 시도
-            for script in soup.find_all('script'):
-                script_text = script.string
-                if script_text and 'postList' in script_text:
-                    # JSON 데이터 추출
-                    match = re.search(r'postList\s*:\s*(\[.*?\])', script_text, re.DOTALL)
-                    if match:
-                        try:
-                            post_list_json = match.group(1)
-                            post_list = json.loads(post_list_json)
-                            
-                            posts = []
-                            for post_info in post_list:
-                                post = {
-                                    'logNo': str(post_info.get('logNo', '')),
-                                    'title': post_info.get('title', ''),
-                                    'date': post_info.get('addDate', ''),
-                                    'is_private': post_info.get('openType') != 'PUBLIC',
-                                    'url': f"https://blog.naver.com/{blog_id}/{post_info.get('logNo', '')}"
-                                }
-                                posts.append(post)
-                                
-                            return posts
-                        except:
-                            continue
-            
-            # HTML에서 직접 포스트 목록 추출 시도
-            posts = []
-            for row in soup.select('.post_item'):
+            # 재시도 로직 구현
+            while retry_count <= max_retries:
                 try:
-                    log_no = ''
-                    title = ''
-                    date = ''
-                    is_private = False
-                    
-                    # logNo 추출
-                    log_no_elem = row.select_one('a[href*="logNo="]')
-                    if log_no_elem:
-                        href = log_no_elem.get('href', '')
-                        if 'logNo=' in href:
-                            log_no = href.split('logNo=')[1].split('&')[0]
-                    
-                    # 제목 추출
-                    title_elem = row.select_one('.title, .post_title')
-                    if title_elem:
-                        title = title_elem.get_text().strip()
-                    
-                    # 날짜 추출
-                    date_elem = row.select_one('.date, .post_date')
-                    if date_elem:
-                        date = date_elem.get_text().strip()
-                    
-                    # 비공개 여부
-                    private_elem = row.select_one('.private, .secret')
-                    if private_elem:
-                        is_private = True
-                    
-                    if log_no and title:
-                        posts.append({
-                            'logNo': log_no,
-                            'title': title,
-                            'date': date,
-                            'is_private': is_private,
-                            'url': f"https://blog.naver.com/{blog_id}/{log_no}"
-                        })
-                except Exception as e:
-                    logger.error(f"HTML 항목 파싱 오류: {str(e)}")
-                    continue
+                    response = session.get(
+                        ajax_url,
+                        headers=headers,
+                        params={
+                            'blogId': blog_id,
+                            'menu': 'post',
+                            'range': 'all',  # 전체 기간
+                            'page': page,    # 현재 페이지 번호
+                            'countPerPage': 20,  # 페이지당 20개
+                        },
+                        timeout=5
+                    )
+                    break
+                except Exception as retry_error:
+                    retry_count += 1
+                    logger.warning(f"AJAX 요청 재시도 {retry_count}/{max_retries}: {str(retry_error)}")
+                    time.sleep(1)  # 1초 대기 후 재시도
             
-            return posts
+            if not response or response.status_code != 200:
+                logger.error(f"관리자 API 응답 오류 (페이지 {page}): {response.status_code if response else 'No response'}")
+                break
             
+            # JSON 응답 파싱 시도
+            try:
+                data = response.json()
+                post_list = data.get('postList', [])
+                
+                # 필요한 정보 추출
+                page_posts = []
+                for post_info in post_list:
+                    post = {
+                        'logNo': str(post_info.get('logNo', '')),
+                        'title': post_info.get('title', ''),
+                        'date': post_info.get('addDate', ''),
+                        'is_private': post_info.get('openType') != 'PUBLIC',
+                        'url': f"https://blog.naver.com/{blog_id}/{post_info.get('logNo', '')}"
+                    }
+                    page_posts.append(post)
+                
+                # 결과에 추가
+                all_posts.extend(page_posts)
+                logger.debug(f"페이지 {page}에서 {len(page_posts)}개 포스트 발견, 현재까지 총 {len(all_posts)}개")
+                
+                # 더 이상 포스트가 없으면 종료
+                if len(page_posts) < 20:
+                    logger.debug(f"페이지 {page}에서 20개 미만의 포스트 발견, 수집 종료")
+                    break
+                
+                # 다음 페이지로
+                page += 1
+                
+            except ValueError:
+                # JSON 파싱 실패 시 HTML로 간주하고 파싱 시도
+                soup = BeautifulSoup(response.text, 'html.parser')
+                
+                # HTML에서 스크립트를 찾아 JSON 데이터 추출 시도
+                page_posts = []
+                
+                # 스크립트에서 JSON 추출 시도
+                for script in soup.find_all('script'):
+                    script_text = script.string if script.string else ""
+                    if 'postList' in script_text:
+                        # JSON 데이터 추출
+                        match = re.search(r'postList\s*:\s*(\[.*?\])', script_text, re.DOTALL)
+                        if match:
+                            try:
+                                post_list_json = match.group(1)
+                                post_list = json.loads(post_list_json)
+                                
+                                for post_info in post_list:
+                                    post = {
+                                        'logNo': str(post_info.get('logNo', '')),
+                                        'title': post_info.get('title', ''),
+                                        'date': post_info.get('addDate', ''),
+                                        'is_private': post_info.get('openType') != 'PUBLIC',
+                                        'url': f"https://blog.naver.com/{blog_id}/{post_info.get('logNo', '')}"
+                                    }
+                                    page_posts.append(post)
+                            except:
+                                continue
+                
+                # HTML에서 직접 포스트 목록 추출 시도
+                if not page_posts:
+                    for row in soup.select('.post_item, .lst_item, .admin_post'):
+                        try:
+                            log_no = ''
+                            title = ''
+                            date = ''
+                            is_private = False
+                            
+                            # logNo 추출
+                            log_no_elem = row.select_one('a[href*="logNo="]')
+                            if log_no_elem:
+                                href = log_no_elem.get('href', '')
+                                if 'logNo=' in href:
+                                    log_no = href.split('logNo=')[1].split('&')[0]
+                            
+                            # 제목 추출
+                            title_elem = row.select_one('.title, .post_title, .area_text')
+                            if title_elem:
+                                title = title_elem.get_text().strip()
+                            
+                            # 날짜 추출
+                            date_elem = row.select_one('.date, .post_date, .date_info')
+                            if date_elem:
+                                date = date_elem.get_text().strip()
+                            
+                            # 비공개 여부
+                            private_elem = row.select_one('.private, .secret, .ico_secret, .lock')
+                            if private_elem:
+                                is_private = True
+                            
+                            if log_no and title:
+                                page_posts.append({
+                                    'logNo': log_no,
+                                    'title': title,
+                                    'date': date,
+                                    'is_private': is_private,
+                                    'url': f"https://blog.naver.com/{blog_id}/{log_no}"
+                                })
+                        except Exception as e:
+                            logger.error(f"HTML 항목 파싱 오류: {str(e)}")
+                            continue
+                
+                # 결과에 추가
+                all_posts.extend(page_posts)
+                logger.debug(f"페이지 {page}에서 {len(page_posts)}개 포스트 발견 (HTML), 현재까지 총 {len(all_posts)}개")
+                
+                # 더 이상 포스트가 없으면 종료
+                if len(page_posts) < 20:
+                    logger.debug(f"페이지 {page}에서 20개 미만의 포스트 발견, 수집 종료")
+                    break
+                
+                # 다음 페이지로
+                page += 1
+        
+        return all_posts
+        
     except Exception as e:
         logger.error(f"관리자 API 호출 오류: {str(e)}")
         return []

@@ -98,6 +98,109 @@ def create_authenticated_session(access_token):
     return session
 
 
+def fetch_mobile_lognos(session, blog_id):
+    """
+    네이버 모바일 블로그에서 포스트 ID(logNo) 목록만 가져옵니다.
+    
+    Args:
+        session (requests.Session): 인증된 세션
+        blog_id (str): 블로그 ID
+        
+    Returns:
+        list: logNo 목록, 실패 시 None
+    """
+    try:
+        # 모바일 PostList URL
+        url = f"https://m.blog.naver.com/PostList.naver?blogId={blog_id}"
+        
+        # 재시도 로직
+        max_retries = 2
+        retry_count = 0
+        response = None
+        
+        while retry_count <= max_retries:
+            try:
+                logger.debug(f"모바일 PostList 요청 시도 {retry_count+1}/{max_retries+1}")
+                response = session.get(url, timeout=5)
+                if response.status_code == 200:
+                    break
+            except Exception as retry_error:
+                logger.warning(f"모바일 API 요청 재시도 {retry_count+1}/{max_retries+1}: {str(retry_error)}")
+            
+            retry_count += 1
+            time.sleep(1)  # backoff
+        
+        if not response or response.status_code != 200:
+            logger.error(f"모바일 API 응답 오류: {response.status_code if response else 'No response'}")
+            return None
+        
+        # logNo 목록 추출
+        log_nos = []
+        
+        # 1. JSON 데이터 찾기 (페이지에 내장된 JSON)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        for script in soup.find_all('script'):
+            script_text = script.string if script.string else ""
+            
+            # postList 객체 찾기
+            json_pattern = re.compile(r'(?:blogPostListForm|blogInfo|postList)\s*=\s*(\{.*?\});', re.DOTALL)
+            json_matches = json_pattern.findall(script_text)
+            
+            for json_str in json_matches:
+                try:
+                    # JavaScript 객체를 JSON으로 변환
+                    json_str = re.sub(r'(\w+):', r'"\1":', json_str)  # 키에 따옴표 추가
+                    json_str = re.sub(r',\s*\}', '}', json_str)  # 후행 콤마 제거
+                    data = json.loads(json_str)
+                    
+                    # 다양한 JSON 구조 처리
+                    post_list = data.get('postList') or data.get('posts') or []
+                    
+                    for post_info in post_list:
+                        log_no = str(post_info.get('logNo', ''))
+                        if log_no and log_no.isdigit() and log_no not in log_nos:
+                            log_nos.append(log_no)
+                except Exception as json_error:
+                    logger.debug(f"JSON 파싱 오류: {str(json_error)}")
+                    continue
+        
+        # 2. HTML에서 직접 logNo 추출
+        if not log_nos:
+            # href에서 logNo 파라미터 찾기
+            for link in soup.find_all('a'):
+                href = link.get('href', '')
+                if 'logNo=' in href:
+                    try:
+                        log_no = href.split('logNo=')[1].split('&')[0]
+                        if log_no.isdigit() and log_no not in log_nos:
+                            log_nos.append(log_no)
+                    except:
+                        continue
+                
+                # /blogId/logNo 형식 체크
+                elif f'/{blog_id}/' in href:
+                    try:
+                        parts = href.split(f'/{blog_id}/')[1].split('?')[0].split('/')
+                        for part in parts:
+                            if part.isdigit() and part not in log_nos:
+                                log_nos.append(part)
+                                break
+                    except:
+                        continue
+        
+        if log_nos:
+            logger.debug(f"모바일 API에서 {len(log_nos)}개의 logNo 발견")
+            return log_nos
+        
+        logger.warning(f"모바일 API에서 logNo를 찾을 수 없음")
+        return None
+        
+    except Exception as e:
+        logger.error(f"모바일 API 호출 오류: {str(e)}")
+        return None
+
+
 def get_posts_via_mobile_api(session, blog_id):
     """
     네이버 모바일 블로그 API를 사용하여 포스트 목록을 가져옵니다.
@@ -110,147 +213,33 @@ def get_posts_via_mobile_api(session, blog_id):
         list: 포스트 목록
     """
     try:
-        # 모바일 API 엔드포인트들
-        endpoints = [
-            # 1. 모바일 메인 페이지 (기본)
-            f"https://m.blog.naver.com/api/blogs/{blog_id}/post-list?categoryNo=0&tabType=RECENT",
-            # 2. 모바일 PostList 페이지
-            f"https://m.blog.naver.com/PostList.naver?blogId={blog_id}&categoryNo=0",
-            # 3. 오래된 API 호환성
-            f"https://m.blog.naver.com/PluginPost.naver?blogId={blog_id}"
-        ]
+        # 먼저 모바일 API로 logNo 목록 가져오기
+        log_nos = fetch_mobile_lognos(session, blog_id)
         
+        if not log_nos:
+            logger.warning("모바일 API에서 포스트 목록을 가져오지 못했습니다")
+            return []
+        
+        # 각 포스트의 상세 내용 가져오기
         posts = []
         
-        # 각 엔드포인트 시도
-        for idx, url in enumerate(endpoints):
-            logger.debug(f"모바일 API 시도 #{idx+1}: {url}")
-            
-            try:
-                response = session.get(url, timeout=30)
-                
-                if response.status_code != 200:
-                    logger.warning(f"API #{idx+1} 응답 오류: {response.status_code}")
-                    continue
-                
-                # 1. JSON 응답인지 확인
-                if 'application/json' in response.headers.get('Content-Type', ''):
-                    data = response.json()
-                    
-                    # 새로운 모바일 API 형식
-                    if 'result' in data and 'postList' in data.get('result', {}):
-                        post_list = data['result']['postList']
-                        
-                        for post_info in post_list:
-                            post = {
-                                'logNo': str(post_info.get('logNo', '')),
-                                'title': post_info.get('title', ''),
-                                'date': post_info.get('publishDate', ''),
-                                'is_private': post_info.get('openType', '') != 'PUBLIC',
-                                'url': f"https://blog.naver.com/{blog_id}/{post_info.get('logNo', '')}"
-                            }
-                            posts.append(post)
-                        
-                        if posts:
-                            return posts
-                
-                # 2. HTML 응답 파싱
-                soup = BeautifulSoup(response.text, 'html.parser')
-                
-                # JSON 데이터 찾기 (페이지에 내장된 JSON)
-                for script in soup.find_all('script'):
-                    script_text = script.string
-                    if not script_text:
-                        continue
-                        
-                    # JSON 객체 추출 시도
-                    json_pattern = re.compile(r'(?:blogPostListForm|blogInfo|postList)\s*=\s*(\{.*?\});', re.DOTALL)
-                    json_matches = json_pattern.findall(script_text)
-                    
-                    for json_str in json_matches:
-                        try:
-                            # JSON 문자열 정리 및 파싱
-                            json_str = re.sub(r'(\w+):', r'"\1":', json_str)  # 키에 따옴표 추가
-                            json_str = re.sub(r',\s*\}', '}', json_str)  # 후행 콤마 제거
-                            data = json.loads(json_str)
-                            
-                            # 다양한 JSON 구조 처리
-                            post_list = data.get('postList') or data.get('posts') or []
-                            
-                            if post_list:
-                                for post_info in post_list:
-                                    log_no = str(post_info.get('logNo', ''))
-                                    title = post_info.get('title', '')
-                                    date = post_info.get('addDate', '') or post_info.get('publishDate', '')
-                                    
-                                    if log_no and title:
-                                        post = {
-                                            'logNo': log_no,
-                                            'title': title,
-                                            'date': date,
-                                            'is_private': False,  # 모바일 API에서는 확인 어려움
-                                            'url': f"https://blog.naver.com/{blog_id}/{log_no}"
-                                        }
-                                        posts.append(post)
-                                
-                                if posts:
-                                    return posts
-                        except:
-                            continue
-                
-                # 3. HTML에서 직접 포스트 목록 추출
-                post_items = soup.select('.post_item, .list_item, .box_post, [class*="list_post"]')
-                
-                for item in post_items:
-                    try:
-                        # logNo 추출
-                        log_no = ''
-                        for a_tag in item.find_all('a'):
-                            href = a_tag.get('href', '')
-                            if 'logNo=' in href:
-                                log_no = href.split('logNo=')[1].split('&')[0]
-                                break
-                        
-                        if not log_no:
-                            # /blogId/logNo 형식도 체크
-                            for a_tag in item.find_all('a'):
-                                href = a_tag.get('href', '')
-                                if f'/{blog_id}/' in href:
-                                    parts = href.split(f'/{blog_id}/')[1].split('?')[0].split('/')
-                                    for part in parts:
-                                        if part.isdigit():
-                                            log_no = part
-                                            break
-                                    if log_no:
-                                        break
-                        
-                        # 제목 추출
-                        title_elem = item.select_one('.title, .tit, [class*="tit_post"], [class*="post_title"]')
-                        title = title_elem.get_text(strip=True) if title_elem else ''
-                        
-                        # 날짜 추출
-                        date_elem = item.select_one('.date, [class*="date_post"]')
-                        date = date_elem.get_text(strip=True) if date_elem else ''
-                        
-                        if log_no and title:
-                            post = {
-                                'logNo': log_no,
-                                'title': title,
-                                'date': date,
-                                'is_private': False,  # HTML에서 판단 어려움
-                                'url': f"https://blog.naver.com/{blog_id}/{log_no}"
-                            }
-                            posts.append(post)
-                    except Exception as item_error:
-                        logger.error(f"HTML 항목 파싱 오류: {str(item_error)}")
-                        continue
-                
-                if posts:
-                    return posts
-                    
-            except Exception as endpoint_error:
-                logger.error(f"API #{idx+1} 호출 오류: {str(endpoint_error)}")
+        # 최대 30개로 제한
+        if len(log_nos) > 30:
+            logger.debug(f"포스트 수 제한: {len(log_nos)}개 -> 30개")
+            log_nos = log_nos[:30]
         
+        for log_no in log_nos:
+            try:
+                post_detail = get_post_detail(session, blog_id, log_no)
+                if post_detail:
+                    posts.append(post_detail)
+                    # 서버 부하 방지
+                    time.sleep(0.5)
+            except Exception as post_error:
+                logger.error(f"포스트 {log_no} 처리 중 오류: {str(post_error)}")
+                continue
+        
+        logger.debug(f"총 {len(posts)}개의 상세 포스트를 가져왔습니다")
         return posts
         
     except Exception as e:
