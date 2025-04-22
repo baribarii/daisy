@@ -195,11 +195,17 @@ def analyze_blog_content(content):
     try:
         logger.debug("Starting content analysis with OpenAI API")
         
-        # Check if content is too large
-        if len(content) > 100000:
-            # If too large, use a representative sample
-            logger.debug(f"Content too large ({len(content)} chars), truncating")
-            content = content[:100000]  # Take first 100K chars
+        # Check if content is too large - OpenAI 모델의 최대 토큰 수를 고려하여 크기 제한
+        if len(content) > 50000:
+            # 콘텐츠가 너무 크면 대표 샘플만 사용
+            logger.debug(f"Content too large ({len(content)} chars), truncating to 50K")
+            
+            # 앞부분(25K)과 뒷부분(25K)를 균등하게 추출하여 전체 내용을 대표할 수 있도록 함
+            first_part = content[:25000]  # 처음 25K 문자
+            last_part = content[-25000:]  # 마지막 25K 문자
+            content = first_part + "\n...[내용 중략]...\n" + last_part
+            
+            logger.debug(f"Truncated content length: {len(content)} chars")
         
         # Define the analysis prompt
         prompt = """
@@ -249,7 +255,7 @@ def analyze_blog_content(content):
                 response_format={"type": "json_object"},
                 max_tokens=4000,
                 temperature=0.7,
-                timeout=60  # 60초 타임아웃 설정
+                timeout=120  # 120초(2분) 타임아웃 설정으로 늘림
             )
         except Exception as api_error:
             logger.error(f"OpenAI API 호출 오류: {str(api_error)}")

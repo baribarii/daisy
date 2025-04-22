@@ -259,34 +259,47 @@ def view_report(report_id):
     # Get the blog
     blog = Blog.query.get_or_404(report.blog_id)
     
-    # Get the blog posts (최대 10개만 표시)
-    posts = BlogPost.query.filter_by(blog_id=report.blog_id).order_by(BlogPost.date.desc()).limit(10).all()
+    # Get the blog posts (최대 30개까지 표시 - 최신 순으로 정렬)
+    posts = BlogPost.query.filter_by(blog_id=report.blog_id).order_by(BlogPost.date.desc()).limit(30).all()
     
     # 각 포스트 컨텐츠 중 일부만 발췌 (미리보기용)
     for post in posts:
-        # 본문이 길면 앞부분 200자만 표시하고 '...' 추가
-        if len(post.content) > 200:
-            post.preview = post.content[:200] + '...'
+        # 본문이 길면 앞부분 150자만 표시하고 '...' 추가 (UI 레이아웃 개선)
+        if len(post.content) > 150:
+            post.preview = post.content[:150] + '...'
         else:
             post.preview = post.content
         
+        # 비공개 글인 경우 표시 추가
+        if post.is_private:
+            post.preview = "[비공개 글] " + post.preview
+        
         # 네이버 블로그 URL 형식으로 포스트 URL 구성
         # 블로그 URL에서 ID 추출
-        blog_id = blog.url.split('/')[-1]  # URL에서 블로그 ID 추출
-        if '?' in blog_id:  # 쿼리 파라미터가 있으면 제거
-            blog_id = blog_id.split('?')[0]
-        # 네이버 블로그 URL은 logNo 또는 id 파라미터를 사용합니다
-        # 포스트의 ID는 데이터베이스 ID가 아니라 네이버 블로그에서의 실제 ID를 사용해야 함
-        # 하지만 현재 저장된 ID는 DB ID이므로 임시로 사용
-        # import re에서 logNo 추출 패턴을 사용할 수 있음
         import re
-        logno_match = re.search(r'logNo=(\d+)', post.content)
-        if logno_match:
-            logno = logno_match.group(1)
-            post.url = f"https://blog.naver.com/{blog_id}/{logno}"
+        from scraper import extract_blog_id
+        
+        # 블로그 URL에서 ID 추출
+        blog_user_id = extract_blog_id(blog.url)
+        if not blog_user_id:
+            # URL에서 직접 추출 시도
+            blog_user_id = blog.url.split('/')[-1]
+            if '?' in blog_user_id:
+                blog_user_id = blog_user_id.split('?')[0]
+        
+        # DB에 저장된 실제 logNo 사용 (BlogPost.logNo 필드 필요)
+        # 데이터 모델에 logNo가 없으면 content에서 추출 시도
+        if hasattr(post, 'logNo') and post.logNo:
+            post.url = f"https://blog.naver.com/{blog_user_id}/{post.logNo}"
         else:
-            # 로그번호를 찾을 수 없는 경우 임시로 DB ID 사용
-            post.url = f"https://blog.naver.com/{blog_id}?Redirect=Log&logNo={post.id}"
+            # content에서 logNo 추출 시도
+            logno_match = re.search(r'logNo=(\d+)', post.content)
+            if logno_match:
+                logno = logno_match.group(1)
+                post.url = f"https://blog.naver.com/{blog_user_id}/{logno}"
+            else:
+                # 마지막 대안: 데이터베이스 ID 사용 (실제 네이버 URL과 다를 수 있음)
+                post.url = f"https://blog.naver.com/{blog_user_id}?Redirect=Log&logNo={post.id}"
     
     return render_template('report.html', report=report, blog=blog, posts=posts)
 
