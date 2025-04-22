@@ -151,10 +151,22 @@ def analyze_blog_content(content):
             
             result = json.loads(response_content)
             
+            # API 응답 키는 대문자로 시작할 수 있으므로 소문자로 변환하여 표준화
+            # OpenAI API가 "Characteristics" 형식으로 반환할 수 있음
+            normalized_result = {}
+            for key, value in result.items():
+                # 대소문자 구분 없이 키를 소문자로 변환
+                normalized_key = key.lower()
+                normalized_result[normalized_key] = value
+            
+            # 표준화된 결과 사용
+            result = normalized_result
+            
             # 결과 검증 - 모든 필요한 키가 있는지 확인
             required_keys = ['characteristics', 'strengths', 'weaknesses', 'thinking_patterns', 
                              'decision_making', 'unconscious_biases', 'advice']
             
+            # 모든 키를 소문자로 비교
             missing_keys = [key for key in required_keys if key not in result or not result[key]]
             
             if missing_keys:
