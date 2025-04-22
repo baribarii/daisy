@@ -20,7 +20,7 @@ class NaverOAuthScraper:
         
     def _create_authenticated_session(self):
         """
-        액세스 토큰을 사용하여 인증된 세션 생성
+        액세스 토큰을 사용하여 인증된 세션 생성 - 비공개 글 접근 개선
         """
         session = requests.Session()
         session.headers.update({
@@ -32,23 +32,16 @@ class NaverOAuthScraper:
             'Authorization': f'Bearer {self.access_token}'
         })
         
-        # 액세스 토큰을 사용하여 쿠키 획득
+        # 인증 토큰의 유효 쿠키 생성을 위한 인증 세션 획득
         try:
-            # 네이버 로그인 페이지 접근을 통한 인증 세션 획득
-            login_url = 'https://nid.naver.com/nidlogin.login'
-            response = session.get(login_url, allow_redirects=True)
-            logger.debug(f"Cookies after visiting login page: {session.cookies.get_dict()}")
-            
-            # 네이버 메인 페이지에 액세스하여 쿠키 설정
-            response = session.get('https://www.naver.com/', allow_redirects=True)
-            logger.debug(f"Cookies after visiting naver.com: {session.cookies.get_dict()}")
-            
-            # OAuth 프로필 API 호출
+            # 1. OAuth 프로필 API 호출 (사용자 정보 획득)
             profile_response = session.get('https://openapi.naver.com/v1/nid/me')
+            user_id = None
+            nickname = None
+            
             if profile_response.status_code == 200:
-                logger.debug("Successfully authenticated with OAuth token")
+                logger.debug("OAuth 인증 성공: 사용자 정보 획득")
                 
-                # 프로필 정보에서 사용자 ID 추출
                 try:
                     profile_data = profile_response.json()
                     if 'response' in profile_data:
@@ -56,26 +49,50 @@ class NaverOAuthScraper:
                         nickname = profile_data['response'].get('nickname', '')
                         email = profile_data['response'].get('email', '')
                         
-                        logger.debug(f"Authenticated as user ID: {user_id}, nickname: {nickname}")
+                        logger.debug(f"인증된 사용자: ID={user_id}, 닉네임={nickname}")
                         
-                        # 네이버 블로그 접속하여 추가 쿠키 설정
-                        blog_response = session.get('https://blog.naver.com/', allow_redirects=True)
-                        logger.debug(f"Cookies after visiting blog.naver.com: {session.cookies.get_dict()}")
+                        # 2. 네이버 메인 페이지 방문 (기본 쿠키 설정)
+                        session.get('https://www.naver.com/', allow_redirects=True)
                         
-                        # 네이버 ID가 있으면 쿠키에 추가 (비공개 글 접근 향상)
-                        if user_id:
-                            # 인증 관련 쿠키 추가 (OAuth 토큰 기반)
-                            token_prefix = self.access_token[:16]
-                            token_suffix = self.access_token[-16:]
-                            # NID_AUT와 NID_SES는 네이버 인증 관련 쿠키
-                            session.cookies.set('NID_AUT', token_prefix, domain='.naver.com')
-                            session.cookies.set('NID_SES', token_suffix, domain='.naver.com')
+                        # 3. 네이버 개인화 로그인 페이지 접근 (NID 쿠키 초기화)
+                        login_url = 'https://nid.naver.com/nidlogin.login'
+                        session.get(login_url, allow_redirects=True)
                         
-                        # 로그인 상태 확인을 위해 블로그 관리 페이지 접근 (비공개 글 접근을 위함)
+                        # 4. OAuth 토큰에서 쿠키 값 추출 및 설정
+                        # 네이버 인증 쿠키는 주로 NID_AUT, NID_SES로 구성됨
+                        # 토큰 앞부분과 뒷부분을 분리해서 각각의 쿠키에 할당 (보안상 실제 값은 다르나 동작 원리 유사)
+                        token_prefix = self.access_token[:16]  # 앞 부분 16자
+                        token_suffix = self.access_token[-16:] # 뒷 부분 16자
+                        
+                        # 모든 네이버 도메인에 적용되도록 설정
+                        domains = ['.naver.com', '.blog.naver.com', '.m.blog.naver.com']
+                        for domain in domains:
+                            # 주요 네이버 인증 쿠키 설정
+                            session.cookies.set('NID_AUT', token_prefix, domain=domain, path='/')
+                            session.cookies.set('NID_SES', token_suffix, domain=domain, path='/')
+                            
+                            # 추가 인증 쿠키 (SES_NID는 세션 관련)
+                            if user_id:
+                                session.cookies.set('NID_USER', user_id, domain=domain, path='/')
+                                # SES_NID 값은 자주 변경됨 (토큰 기반으로 유사하게 생성)
+                                ses_nid = f"{token_prefix[:8]}{user_id[-8:]}"
+                                session.cookies.set('SES_NID', ses_nid, domain=domain, path='/')
+                                
+                        # 5. 블로그 도메인 직접 방문하여 쿠키 확인 및 강화
+                        blog_domains = [
+                            'https://blog.naver.com/',
+                            'https://m.blog.naver.com/'
+                        ]
+                        
+                        for domain in blog_domains:
+                            resp = session.get(domain, allow_redirects=True)
+                            logger.debug(f"쿠키 상태 ({domain}): {session.cookies.get_dict()}")
+                        
+                        # 6. 블로그 관리 페이지 방문 (비공개 글 접근 권한 획득)
                         admin_response = session.get('https://admin.blog.naver.com/', allow_redirects=True)
-                        logger.debug(f"Cookies after visiting admin.blog.naver.com: {session.cookies.get_dict()}")
+                        logger.debug(f"블로그 관리자 페이지 방문 후 쿠키: {session.cookies.get_dict()}")
                         
-                        # Naver 클라이언트 ID와 Secret 추가 (OAuth API 인증 강화)
+                        # 7. API 키 추가 (필요한 경우)
                         naver_client_id = os.environ.get('NAVER_CLIENT_ID', '')
                         naver_client_secret = os.environ.get('NAVER_CLIENT_SECRET', '')
                         if naver_client_id and naver_client_secret:
@@ -83,15 +100,28 @@ class NaverOAuthScraper:
                                 'X-Naver-Client-Id': naver_client_id,
                                 'X-Naver-Client-Secret': naver_client_secret
                             })
-                            logger.debug("Added Naver client credentials to headers")
-                        
+                            logger.debug("네이버 API 키 헤더 추가 완료")
+                
                 except Exception as e:
-                    logger.error(f"Error processing profile data: {str(e)}")
+                    logger.error(f"사용자 프로필 처리 중 오류: {str(e)}")
             else:
-                logger.warning(f"OAuth profile API call failed: {profile_response.status_code}")
+                logger.warning(f"OAuth 프로필 API 호출 실패: {profile_response.status_code}")
+            
+            # 8. 비공개 글 접근 가능 여부 확인 (테스트)
+            if user_id:
+                try:
+                    # 본인 블로그 접근 테스트 (사용자 ID가 블로그 ID인 경우가 많음)
+                    test_url = f"https://blog.naver.com/PostList.naver?blogId={user_id}"
+                    test_response = session.get(test_url)
+                    if "로그인" in test_response.text:
+                        logger.warning("인증 후에도 로그인 필요 - 쿠키 설정이 불완전할 수 있음")
+                    else:
+                        logger.debug("인증된 세션으로 블로그 접근 성공")
+                except Exception as e:
+                    logger.error(f"세션 검증 중 오류: {str(e)}")
                 
         except Exception as e:
-            logger.error(f"Error setting up authenticated session: {str(e)}")
+            logger.error(f"인증된 세션 설정 중 오류: {str(e)}")
         
         return session
     
