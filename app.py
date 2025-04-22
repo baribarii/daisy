@@ -280,8 +280,10 @@ def analyze_blog(blog_id):
         
         # 포스트 메타데이터와 함께 콘텐츠 구성
         for i, post in enumerate(sorted_posts, 1):
-            # 포스트 번호와 날짜 추가
-            date_info = f"작성일: {post.date}" if post.date else ""
+            # 포스트 번호와 날짜 추가 (날짜 정규화)
+            from blog_scraper_pipeline import normalize_date_format
+            normalized_date = normalize_date_format(post.date) if post.date else ""
+            date_info = f"작성일: {normalized_date}" if normalized_date else ""
             privacy_info = "[비공개 글]" if post.is_private else "[공개 글]"
             
             # 각 포스트별 구분선 추가하여 가독성 향상
@@ -342,6 +344,9 @@ def analyze_blog(blog_id):
 @app.route('/report/<int:report_id>')
 def view_report(report_id):
     try:
+        # 날짜 정규화 함수 임포트
+        from blog_scraper_pipeline import normalize_date_format
+        
         # Get the report
         report = Report.query.get_or_404(report_id)
         
@@ -397,7 +402,11 @@ def view_report(report_id):
             
             # 필요한 기타 정보
             post_view['title'] = post.title
-            post_view['date'] = post.date
+            # 날짜 정규화 (템플릿에 표시될 때 사용)
+            if post.date:
+                post_view['date'] = normalize_date_format(post.date)
+            else:
+                post_view['date'] = ""
             post_view['is_private'] = post.is_private
             
             # 메모리 내 배열에 추가

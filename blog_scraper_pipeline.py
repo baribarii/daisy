@@ -1,5 +1,7 @@
 import logging
 import time
+import re
+import datetime
 from blog_utils import extract_blog_id
 from scrape_blog_admin import scrape_blog_admin_mode, get_posts_via_admin_api, create_authenticated_session as create_admin_session
 from scrape_blog_mobile import scrape_blog_mobile_mode, fetch_mobile_lognos, get_post_detail as get_mobile_post_detail
@@ -7,6 +9,77 @@ from scrape_blog_rss import scrape_blog_rss_mode, fetch_rss_lognos
 
 # 로깅 설정
 logger = logging.getLogger(__name__)
+
+def normalize_date_format(date_str):
+    """
+    다양한 네이버 블로그 날짜 형식을 YYYY-MM-DD 형식으로 정규화합니다.
+    
+    Args:
+        date_str (str): 원본 날짜 문자열
+        
+    Returns:
+        str: YYYY-MM-DD 형식의 날짜, 변환 실패 시 원본 문자열 반환
+    """
+    if not date_str:
+        # 현재 날짜 기본값 사용
+        return datetime.datetime.now().strftime("%Y-%m-%d")
+    
+    date_str = date_str.strip()
+    
+    # 이미 YYYY-MM-DD 형식이면 그대로 반환
+    if re.match(r'^\d{4}-\d{2}-\d{2}$', date_str):
+        return date_str
+    
+    try:
+        # 네이버 날짜 형식 1: "YYYY. MM. DD."
+        if re.match(r'^\d{4}\.\s*\d{1,2}\.\s*\d{1,2}\.?$', date_str):
+            cleaned = re.sub(r'[\.\s]', '', date_str)
+            if len(cleaned) >= 8:
+                year = cleaned[0:4]
+                month = cleaned[4:6].zfill(2)
+                day = cleaned[6:8].zfill(2)
+                return f"{year}-{month}-{day}"
+        
+        # 네이버 날짜 형식 2: "YYYY년 MM월 DD일"
+        elif re.search(r'\d{4}년\s*\d{1,2}월\s*\d{1,2}일', date_str):
+            match = re.search(r'(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일', date_str)
+            if match:
+                year, month, day = match.groups()
+                return f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+        
+        # 네이버 날짜 형식 3: "MMM DD, YYYY" (영문)
+        elif re.match(r'[A-Za-z]{3,9}\s+\d{1,2},\s*\d{4}', date_str):
+            try:
+                dt = datetime.datetime.strptime(date_str, "%b %d, %Y")
+                return dt.strftime("%Y-%m-%d")
+            except ValueError:
+                try:
+                    dt = datetime.datetime.strptime(date_str, "%B %d, %Y")
+                    return dt.strftime("%Y-%m-%d")
+                except ValueError:
+                    pass
+        
+        # 네이버 날짜 형식 4: "MM-DD (요일)"
+        elif re.match(r'\d{1,2}-\d{1,2}\s*\([월화수목금토일]\)', date_str):
+            match = re.match(r'(\d{1,2})-(\d{1,2})', date_str)
+            if match:
+                month, day = match.groups()
+                year = datetime.datetime.now().year
+                return f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+        
+        # Unix 타임스탬프 (밀리초)
+        elif re.match(r'^\d{10,13}$', date_str):
+            timestamp = int(date_str)
+            if timestamp > 10000000000:  # 밀리초 타임스탬프
+                timestamp = timestamp / 1000
+            dt = datetime.datetime.fromtimestamp(timestamp)
+            return dt.strftime("%Y-%m-%d")
+    
+    except Exception as e:
+        logger.error(f"날짜 정규화 오류: {str(e)}")
+    
+    # 정규화 실패 시 원본 반환
+    return date_str
 
 def scrape_blog_pipeline(blog_url, access_token=None):
     """
@@ -157,6 +230,10 @@ def scrape_blog_pipeline(blog_url, access_token=None):
                         post_detail['logNo'] = log_no
                     if 'url' not in post_detail:
                         post_detail['url'] = f"https://blog.naver.com/{blog_id}/{log_no}"
+                    
+                    # 날짜 형식 정규화 (YYYY-MM-DD)
+                    if 'date' in post_detail and post_detail['date']:
+                        post_detail['date'] = normalize_date_format(post_detail['date'])
                     
                     posts.append(post_detail)
                     # 서버 부하 방지
