@@ -345,18 +345,49 @@ class NaverBlogScraper:
             
             # 내용 추출 (다양한 레이아웃 대응)
             content_selectors = [
-                '.se_component_wrap', '#viewTypeSelector', '.post_ct', 
-                '.se-main-container', '.se_doc_viewer', 
-                '.view', '#postViewArea', '.post-view', 
-                '.post_content', '.post_body'
+                '.se-main-container', '.se_component_wrap .se_paragraph',
+                '.post_ct', '.se_doc_viewer .se_textarea', 
+                '.se-module-text', '.__se_module_data',
+                '.view .se-text p', '#postViewArea p', 
+                '.post-view p', '.post_content p', '.post_body p'
             ]
             
+            # 네이버 블로그에서 제외해야 할 UI 요소 클래스
+            exclude_classes = [
+                'btn_area', 'social_area', 'like_area', 'btn_share',
+                'font_size_control', 'tool_area', 'tag_area', 'layer_post',
+                'category_area', 'url_area', 'btn_like', 'writer_info',
+                'comment_area', 'footer_area', 'area_sympathy', 'post_menu'
+            ]
+            
+            # 먼저 필요없는 UI 요소 제거
+            for exclude_class in exclude_classes:
+                for element in soup.select(f'.{exclude_class}'):
+                    element.decompose()
+            
+            content = ""
+            # 콘텐츠 추출 시도
             for selector in content_selectors:
-                content_elem = soup.select_one(selector)
-                if content_elem:
-                    content = content_elem.get_text(separator='\n', strip=True)
-                    if content:
+                content_elems = soup.select(selector)
+                if content_elems:
+                    content_parts = []
+                    for elem in content_elems:
+                        text = elem.get_text(separator='\n', strip=True)
+                        if text and len(text) > 20:  # 의미있는 텍스트만 포함
+                            content_parts.append(text)
+                    
+                    if content_parts:
+                        content = '\n\n'.join(content_parts)
                         break
+            
+            # 백업 방법: 여전히 내용이 없으면 기존 방식 시도
+            if not content:
+                for selector in ['.se-main-container', '.view', '#postViewArea', '.post_content']:
+                    content_elem = soup.select_one(selector)
+                    if content_elem:
+                        content = content_elem.get_text(separator='\n', strip=True)
+                        if content:
+                            break
             
             # 날짜 추출
             date_selectors = [
@@ -405,16 +436,46 @@ class NaverBlogScraper:
             
             # 내용 추출 (모바일 레이아웃)
             content_selectors = [
-                '.se_doc_viewer', '.view', '.post_ct', 
-                '.post_view', '.post_content', '.se-main-container'
+                '.se-main-container p', '.se_doc_viewer p', '.view p', 
+                '.post_ct p', '.post_view p', '.post_content p',
+                '.se-text-paragraph', '.se_paragraph'
             ]
             
+            # 네이버 블로그에서 제외해야 할 UI 요소 클래스 (모바일)
+            exclude_classes = [
+                'btn_area', 'social_area', 'like_area', 'btn_share',
+                'font_size_control', 'tool_area', 'tag_area', 
+                'post_menu', 'writer_area', 'comment_wrap', 'area_reply'
+            ]
+            
+            # 먼저 필요없는 UI 요소 제거
+            for exclude_class in exclude_classes:
+                for element in soup.select(f'.{exclude_class}'):
+                    element.decompose()
+            
+            content = ""
+            # 콘텐츠 추출 시도
             for selector in content_selectors:
-                content_elem = soup.select_one(selector)
-                if content_elem:
-                    content = content_elem.get_text(separator='\n', strip=True)
-                    if content:
+                content_elems = soup.select(selector)
+                if content_elems:
+                    content_parts = []
+                    for elem in content_elems:
+                        text = elem.get_text(separator='\n', strip=True)
+                        if text and len(text) > 20:  # 의미있는 텍스트만 포함
+                            content_parts.append(text)
+                    
+                    if content_parts:
+                        content = '\n\n'.join(content_parts)
                         break
+            
+            # 백업 방법: 여전히 내용이 없으면 기존 방식 시도
+            if not content:
+                for selector in ['.se-main-container', '.view', '.post_ct', '.post_content']:
+                    content_elem = soup.select_one(selector)
+                    if content_elem:
+                        content = content_elem.get_text(separator='\n', strip=True)
+                        if content:
+                            break
             
             # 날짜 추출
             date_selectors = [
