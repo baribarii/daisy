@@ -215,10 +215,10 @@ def scrape_blog_pipeline(blog_url, access_token=None):
         # logNo 목록을 얻었으므로 포스트 상세 내용 수집
         logger.debug(f"{method_used} 방식으로 얻은 {len(all_log_nos)}개 logNo로 상세 내용 수집 시작")
         
-        # 최대 30개로 제한
-        if len(all_log_nos) > 30:
-            logger.debug(f"logNo 수 제한: {len(all_log_nos)}개 -> 30개")
-            all_log_nos = all_log_nos[:30]
+        # 최대 10개로 제한 (기존 20개에서 추가 축소하여 타임아웃 방지)
+        if len(all_log_nos) > 10:
+            logger.debug(f"logNo 수 제한: {len(all_log_nos)}개 -> 10개")
+            all_log_nos = all_log_nos[:10]
         
         # 포스트 상세 내용 수집
         posts = []
@@ -260,8 +260,8 @@ def scrape_blog_pipeline(blog_url, access_token=None):
                         post_detail['date'] = normalize_date_format(post_detail['date'])
                     
                     posts.append(post_detail)
-                    # 서버 부하 방지
-                    time.sleep(0.5)
+                    # 서버 부하 방지 (0.5초 → 0.1초로 단축)
+                    time.sleep(0.1)
                 else:
                     # 최대 재시도 후에도 실패하면 최소한의 정보로 기록
                     fallback_post = {

@@ -1,5 +1,7 @@
 import os
 import logging
+import threading
+from queue import Queue
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import DeclarativeBase
@@ -8,6 +10,7 @@ import time
 import urllib.parse
 import markupsafe
 import re
+from datetime import datetime
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
@@ -182,7 +185,12 @@ def oauth_submit_blog():
         # 세션에 blog_id 저장 - 서버 세션 사용
         session['blog_id'] = blog.id
         
-        # 강화된 스크래핑 파이프라인 사용 - 4단계 접근 (관리자, 모바일, RSS)
+        # 백그라운드 처리 설정
+        blog_id = blog.id
+        access_token = session['access_token']
+        db.session.commit()  # 블로그 정보 먼저 저장
+        
+        # 강화된 스크래핑 파이프라인 사용
         try:
             logger.debug("강화된 블로그 스크래핑 파이프라인 시작")
             from blog_scraper_pipeline import scrape_blog_pipeline
@@ -261,9 +269,10 @@ def oauth_submit_blog():
                     title=post.get('title', ''),
                     content=post.get('content', ''),
                     date=post.get('date', ''),
-                    is_private=post.get('is_private', False),
-                    logNo=post.get('logNo', '')  # 네이버 블로그 포스트 ID
+                    is_private=post.get('is_private', False)
                 )
+                # logNo 필드는 별도로 설정 (컬럼명 충돌 방지)
+                blog_post.logNo = post.get('logNo', '')
                 db.session.add(blog_post)
             
             # 저장 결과 로깅
