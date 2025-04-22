@@ -3,6 +3,7 @@ import time
 import json
 import re
 import requests
+from requests.exceptions import RequestException, Timeout, ConnectionError, ReadTimeout
 from bs4 import BeautifulSoup
 from blog_utils import extract_blog_id
 
@@ -304,11 +305,25 @@ def get_post_detail(session, blog_id, log_no):
     try:
         # 모바일 포스트 조회 URL
         url = f"https://m.blog.naver.com/PostView.naver?blogId={blog_id}&logNo={log_no}"
-        response = session.get(url, timeout=30)
         
-        if response.status_code != 200:
-            logger.error(f"모바일 포스트 상세 조회 오류: {response.status_code}")
-            return None
+        # 더 짧은 타임아웃 및 예외 처리 강화
+        try:
+            response = session.get(url, timeout=15, allow_redirects=True)
+            
+            if response.status_code != 200:
+                logger.error(f"모바일 포스트 상세 조회 오류: {response.status_code}")
+                return None
+        except requests.exceptions.RequestException as req_err:
+            logger.error(f"네트워크 요청 오류 (URL: {url}): {str(req_err)}")
+            # 네트워크 오류 시 빈 결과 반환하여 파이프라인 중단 방지
+            return {
+                'logNo': log_no,
+                'title': f'접근 실패: {log_no}',
+                'content': '네트워크 오류로 접근할 수 없는 포스트입니다.',
+                'date': '',
+                'is_private': True,
+                'url': url
+            }
         
         soup = BeautifulSoup(response.text, 'html.parser')
         

@@ -2,6 +2,8 @@ import logging
 import time
 import re
 import datetime
+import requests
+from requests.exceptions import RequestException, Timeout, ConnectionError, ReadTimeout
 from blog_utils import extract_blog_id
 from scrape_blog_admin import scrape_blog_admin_mode, get_posts_via_admin_api, create_authenticated_session as create_admin_session
 from scrape_blog_mobile import scrape_blog_mobile_mode, fetch_mobile_lognos, get_post_detail
@@ -224,9 +226,28 @@ def scrape_blog_pipeline(blog_url, access_token=None):
         
         for log_no in all_log_nos:
             try:
+                # 네트워크 오류 재시도 메커니즘 추가
+                max_retries = 2
+                retry_count = 0
+                post_detail = None
+                
                 # 현재 세션 환경에 맞는 함수 선택 (모바일)
                 from scrape_blog_mobile import get_post_detail
-                post_detail = get_post_detail(session, blog_id, log_no)
+                
+                while retry_count <= max_retries and not post_detail:
+                    try:
+                        logger.debug(f"포스트 {log_no} 상세 내용 가져오기 시도 {retry_count+1}/{max_retries+1}")
+                        post_detail = get_post_detail(session, blog_id, log_no)
+                        break  # 성공하면 루프 종료
+                    except (RequestException, ConnectionError, Timeout, ReadTimeout) as req_err:
+                        logger.warning(f"포스트 {log_no} 네트워크 오류 (재시도 {retry_count+1}/{max_retries+1}): {str(req_err)}")
+                        retry_count += 1
+                        if retry_count <= max_retries:
+                            time.sleep(1)  # 재시도 전 대기
+                    except Exception as other_err:
+                        logger.error(f"포스트 {log_no} 처리 중 오류: {str(other_err)}")
+                        break  # 네트워크 오류가 아닌 경우 재시도하지 않음
+                
                 if post_detail:
                     # 필요한 필드 확인 및 추가
                     if 'logNo' not in post_detail:
@@ -241,6 +262,18 @@ def scrape_blog_pipeline(blog_url, access_token=None):
                     posts.append(post_detail)
                     # 서버 부하 방지
                     time.sleep(0.5)
+                else:
+                    # 최대 재시도 후에도 실패하면 최소한의 정보로 기록
+                    fallback_post = {
+                        'logNo': log_no,
+                        'title': f'접근 실패: {log_no}',
+                        'content': '네트워크 오류로 접근할 수 없는 포스트입니다.',
+                        'date': datetime.datetime.now().strftime("%Y-%m-%d"),
+                        'is_private': True,
+                        'url': f"https://blog.naver.com/{blog_id}/{log_no}"
+                    }
+                    posts.append(fallback_post)
+                    logger.warning(f"포스트 {log_no} 가져오기 실패 후 대체 정보 사용")
             except Exception as post_error:
                 logger.error(f"포스트 {log_no} 처리 중 오류: {str(post_error)}")
                 continue
