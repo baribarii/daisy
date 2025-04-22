@@ -400,11 +400,39 @@ def get_post_detail(session, blog_id, log_no):
                     
         # 형식 정규화를 위해 blog_scraper_pipeline.py에서 처리
         
-        # 비공개 여부 확인
+        # 비공개 여부 확인 (더 많은 키워드와 HTML 패턴 확인)
         is_private = False
+        
+        # 1. 페이지 텍스트에서 비공개 키워드 확인
         page_text = soup.get_text()
-        if "비공개" in page_text or "권한이 없습니다" in page_text:
-            is_private = True
+        private_keywords = [
+            "비공개", "권한이 없습니다", "비밀글", "서비스 권한", "접근 제한", 
+            "친구만 공개", "접근 권한", "비밀번호가 필요한", "비밀번호를 입력하세요"
+        ]
+        
+        for keyword in private_keywords:
+            if keyword in page_text:
+                is_private = True
+                logger.debug(f"비공개 글 감지: 키워드 '{keyword}' 발견")
+                break
+                
+        # 2. 특정 HTML 요소로 비공개 확인
+        if not is_private:
+            # 비공개 아이콘, 클래스 확인
+            private_indicators = soup.select('.ico_lock, .ico_private, .secret_post, .pcs-lock')
+            if private_indicators:
+                is_private = True
+                logger.debug("비공개 글 감지: 비공개 HTML 요소 발견")
+                
+        # 3. 콘텐츠 확인 - 내용이 거의 없으면 비공개일 가능성 높음
+        if not is_private and content and len(content.strip()) < 50:
+            # 접근 제한 등의 텍스트가 있는지 확인
+            short_content_markers = ["권한", "제한", "필요", "access", "denied", "login"]
+            for marker in short_content_markers:
+                if marker in content.lower():
+                    is_private = True
+                    logger.debug(f"비공개 글 감지: 짧은 내용과 제한 키워드 '{marker}' 발견")
+                    break
         
         if title or content:
             return {

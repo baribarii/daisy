@@ -269,6 +269,11 @@ def oauth_submit_blog():
             # 저장 결과 로깅
             logger.info(f"총 {len(posts)}개 포스트 중 {len(new_posts)}개 저장, {duplicates}개 중복 제외")
             
+            # 비공개 글 개수 계산 및 로깅
+            private_posts = [post for post in new_posts if post.get('is_private', False)]
+            private_count = len(private_posts)
+            logger.info(f"저장된 {len(new_posts)}개 포스트 중 공개글 {len(new_posts) - private_count}개, 비공개글 {private_count}개")
+            
             # 모든 작업이 성공하면 커밋
             db.session.commit()
             

@@ -111,9 +111,30 @@ def scrape_blog_pipeline(blog_url, access_token=None):
         all_log_nos = None
         method_used = None
         
-        # 단계 1: 관리자 AJAX 방식 (OAuth 필수)
-        if access_token:
-            logger.debug("단계 1: 관리자 AJAX 방식으로 logNo 수집 시작")
+        # 스크래핑 메소드 순서 변경: 모바일 API를 먼저 시도합니다 (비공개 글 접근성 향상)
+        
+        # 단계 1: 모바일 API 방식 (OAuth 권장, 비공개 글 접근 가능)
+        logger.debug("단계 1: 모바일 API 방식으로 logNo 수집 시작")
+        start_time = time.time()
+        
+        try:
+            # 모바일 API로 logNo 목록 가져오기 (비공개 글 포함)
+            mobile_session = create_admin_session(access_token)
+            mobile_log_nos = fetch_mobile_lognos(mobile_session, blog_id)
+            
+            if mobile_log_nos:
+                all_log_nos = mobile_log_nos
+                method_used = "mobile"
+                duration = time.time() - start_time
+                logger.debug(f"모바일 API 성공: {len(all_log_nos)}개 logNo, {duration:.2f}초 소요")
+            else:
+                logger.warning("모바일 API 방식 실패, 다음 단계로 진행")
+        except Exception as e:
+            logger.error(f"모바일 API logNo 수집 오류: {str(e)}")
+        
+        # 단계 2: 관리자 AJAX 방식 (OAuth 필수)
+        if not all_log_nos and access_token:
+            logger.debug("단계 2: 관리자 AJAX 방식으로 logNo 수집 시작")
             start_time = time.time()
             
             try:
@@ -131,28 +152,8 @@ def scrape_blog_pipeline(blog_url, access_token=None):
                     logger.warning("관리자 AJAX 방식 실패, 다음 단계로 진행")
             except Exception as e:
                 logger.error(f"관리자 AJAX logNo 수집 오류: {str(e)}")
-        else:
+        elif not all_log_nos and not access_token:
             logger.warning("OAuth 토큰이 없어 관리자 AJAX 방식을 건너뜁니다.")
-        
-        # 단계 2: 모바일 API 방식 (OAuth 권장)
-        if not all_log_nos:
-            logger.debug("단계 2: 모바일 API 방식으로 logNo 수집 시작")
-            start_time = time.time()
-            
-            try:
-                # 모바일 API로 logNo 목록 가져오기
-                mobile_session = create_admin_session(access_token)
-                mobile_log_nos = fetch_mobile_lognos(mobile_session, blog_id)
-                
-                if mobile_log_nos:
-                    all_log_nos = mobile_log_nos
-                    method_used = "mobile"
-                    duration = time.time() - start_time
-                    logger.debug(f"모바일 API 성공: {len(all_log_nos)}개 logNo, {duration:.2f}초 소요")
-                else:
-                    logger.warning("모바일 API 방식 실패, 다음 단계로 진행")
-            except Exception as e:
-                logger.error(f"모바일 API logNo 수집 오류: {str(e)}")
         
         # 단계 3: RSS 피드 방식 (OAuth 필수 아님, 공개 글만)
         if not all_log_nos:

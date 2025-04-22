@@ -18,9 +18,17 @@
         <div class="alert alert-info">
             <i class="fas fa-info-circle me-2"></i>
             이 보고서는 <strong>{{ blog.url }}</strong>의 글 내용을 분석하여 생성되었습니다.
-            <p class="report-date mt-2 mb-0">
-                생성일: {{ report.created_at }}
-            </p>
+            <div class="d-flex justify-content-between mt-2">
+                <p class="mb-0">
+                    생성일: {{ report.created_at }}
+                </p>
+                <p class="mb-0">
+                    {% set private_count = posts|selectattr('is_private', 'eq', true)|list|length %}
+                    {% set public_count = posts|length - private_count %}
+                    <span class="badge bg-success me-2">공개 {{ public_count }}개</span>
+                    <span class="badge bg-warning">비공개 {{ private_count }}개</span>
+                </p>
+            </div>
         </div>
         
         <!-- Summary Cards -->
