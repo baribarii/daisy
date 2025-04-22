@@ -305,19 +305,58 @@ def get_post_detail(session, blog_id, log_no):
                 if content:
                     break
         
-        # 날짜 추출
+        # 날짜 추출 - 다양한 네이버 블로그 스킨/버전 지원
         date = ""
         date_selectors = [
+            # 기본 셀렉터
             '.se_publishDate', '.date', '.se_date', '.se-module-date', 
-            '.post_date', '.se-date', '.date_post'
+            '.post_date', '.se-date', '.date_post', '.blog_date', '.date_info',
+            '.blog2_series', '.date_time', '.post-meta', '.post-day', '.article_info',
+            # 네이버 모바일 전용 셀렉터
+            '.sub_info', '.se-fs-fs13', '.writer_info', '.blog_author',
+            # 폰트 속성을 가진 날짜 텍스트 서치
+            '.se-fs-', '.se-text-paragraph' 
         ]
         
+        date_patterns = [
+            r'\d{4}\s*\.\s*\d{1,2}\s*\.\s*\d{1,2}',  # 2024. 4. 22
+            r'\d{4}년\s*\d{1,2}월\s*\d{1,2}일',      # 2024년 4월 22일
+            r'\d{4}[-.]\d{1,2}[-.]\d{1,2}',         # 2024-04-22 또는 2024.04.22
+            r'\d{2,4}[/.]\d{1,2}[/.]\d{1,2}'        # 24/04/22 또는 24.04.22
+        ]
+        
+        # 1. 먼저 날짜 셀렉터를 통해 날짜 요소 찾기
         for selector in date_selectors:
-            date_elem = soup.select_one(selector)
-            if date_elem:
-                date = date_elem.get_text().replace('작성일', '').strip()
+            date_elems = soup.select(selector)  # 여러 요소 선택
+            for date_elem in date_elems:
+                text = date_elem.get_text().replace('작성일', '').strip()
+                # 날짜 패턴 검사
+                for pattern in date_patterns:
+                    match = re.search(pattern, text)
+                    if match:
+                        date = match.group()
+                        break
                 if date:
                     break
+            if date:
+                break
+        
+        # 2. 셀렉터로 못 찾은 경우, 메타 태그 확인
+        if not date:
+            meta_date = soup.select_one('meta[property="og:regDate"], meta[name="article:published_time"]')
+            if meta_date:
+                date = meta_date.get('content', '')
+        
+        # 3. 마지막으로 전체 페이지 텍스트에서 날짜 패턴 검색
+        if not date:
+            page_text = soup.get_text()
+            for pattern in date_patterns:
+                match = re.search(pattern, page_text)
+                if match:
+                    date = match.group()
+                    break
+                    
+        # 형식 정규화를 위해 blog_scraper_pipeline.py에서 처리
         
         # 비공개 여부 확인
         is_private = False
