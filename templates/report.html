@@ -192,7 +192,7 @@
             
             {% if posts %}
             <div class="row">
-                {% for post in posts %}
+                {% for post in posts|sort(attribute='date', reverse=true) %}
                 <div class="col-md-6 mb-3">
                     <div class="card h-100">
                         <div class="card-header">
