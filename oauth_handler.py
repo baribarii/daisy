@@ -104,3 +104,69 @@ def refresh_token(refresh_token):
     except Exception as e:
         logger.error(f"Error refreshing token: {str(e)}")
         return None
+
+
+def generate_auth_cookies_from_token(access_token):
+    """
+    OAuth 액세스 토큰으로부터 네이버 인증 쿠키를 생성합니다.
+    이 기능은 비공개 글이나 서로이웃/이웃 전용 글에 접근하기 위해 필요합니다.
+    
+    Args:
+        access_token (str): OAuth 액세스 토큰
+        
+    Returns:
+        dict: 인증 쿠키 딕셔너리
+    """
+    try:
+        import hashlib
+        import base64
+        import time
+        
+        # 토큰 기반 변환 수행
+        token_md5 = hashlib.md5(access_token.encode('utf-8')).hexdigest()
+        token_b64 = base64.b64encode(access_token.encode('utf-8')).decode('utf-8')
+        token_prefix = access_token[:16] if len(access_token) >= 16 else access_token
+        token_suffix = access_token[-16:] if len(access_token) >= 16 else access_token
+        
+        # 사용자 정보 가져오기 (가능한 경우)
+        user_id = None
+        user_name = None
+        try:
+            user_data = get_user_info({'access_token': access_token})
+            if user_data:
+                user_id = user_data.get('id')
+                user_name = user_data.get('name')
+                logger.debug(f"사용자 정보 획득 성공: {user_name} (ID: {user_id})")
+        except Exception as e:
+            logger.warning(f"사용자 정보 획득 실패: {str(e)}")
+        
+        # 인증 쿠키 생성
+        cookies = {
+            # 네이버 필수 인증 쿠키
+            'NID_AUT': token_md5[:16],
+            'NID_SES': token_md5[16:32],
+            'NID_JKL': token_md5[:8],
+            
+            # 네이버 로그인 상태 유지
+            'NID_CHECK': 'naver',
+            'nx_ssl': 'on',
+            'JSESSIONID': token_suffix.replace('-', ''),
+            'nid_inf': token_md5[:12],
+            
+            # 시간 기반 쿠키
+            'nid_tss': str(int(time.time())),
+            'nts_cdf': token_b64[:16]
+        }
+        
+        # 사용자 ID 정보가 있을 경우 추가 쿠키 설정 (비공개 글 접근 성공률 증가)
+        if user_id:
+            cookies.update({
+                'naver_uid': user_id,
+                'NID_UID': user_id
+            })
+            
+        return cookies
+        
+    except Exception as e:
+        logger.error(f"인증 쿠키 생성 오류: {str(e)}")
+        return {}

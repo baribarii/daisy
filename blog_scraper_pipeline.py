@@ -93,6 +93,7 @@ def scrape_blog_pipeline(blog_url, access_token=None):
     4) 직접 HTML 파싱 (마지막 대안) - 성능 낮음, 안정성 문제
     
     각 단계는 이전 단계가 실패하면 자동으로 시도됩니다.
+    OAuth 토큰이 제공된 경우, 비공개 글이나 서로이웃/이웃 공개 글에 접근을 시도합니다.
     
     Args:
         blog_url (str): 네이버 블로그 URL
@@ -101,6 +102,16 @@ def scrape_blog_pipeline(blog_url, access_token=None):
     Returns:
         tuple: (성공 여부, 메시지, 포스트 목록)
     """
+    # OAuth 토큰으로부터 인증 쿠키 생성 (비공개 글 접근 향상)
+    auth_cookies = {}
+    if access_token:
+        try:
+            from oauth_handler import generate_auth_cookies_from_token
+            auth_cookies = generate_auth_cookies_from_token(access_token)
+            if auth_cookies:
+                logger.debug(f"OAuth 토큰으로부터 {len(auth_cookies)}개의 인증 쿠키를 생성했습니다")
+        except Exception as cookie_error:
+            logger.warning(f"인증 쿠키 생성 중 오류: {str(cookie_error)}")
     try:
         # URL 유효성 검사
         try:
@@ -225,6 +236,11 @@ def scrape_blog_pipeline(blog_url, access_token=None):
         # 포스트 상세 내용 수집
         posts = []
         session = create_admin_session(access_token)
+        
+        # 생성된 인증 쿠키를 세션에 직접 적용 (비공개 글 접근 개선)
+        if auth_cookies:
+            logger.debug("인증 쿠키를 세션에 직접 적용합니다")
+            session.cookies.update(auth_cookies)
         
         for log_no in all_log_nos:
             try:

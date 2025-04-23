@@ -401,16 +401,63 @@ def get_post_detail(session, blog_id, log_no):
         
         # 더 짧은 타임아웃 및 예외 처리 강화
         try:
-            # 인코딩 문제 방지를 위해 인코딩 설정을 명시
-            response = session.get(
-                url, 
-                timeout=15, 
-                allow_redirects=True,
-                headers=custom_headers
-            )
+            # 인코딩 문제 방지를 위해 여러 개선 옵션 적용
+            import urllib.parse
             
-            # 응답 인코딩 명시적 설정 (UTF-8 강제)
-            response.encoding = 'utf-8'
+            # URL을 안전하게 인코딩 (한글 포함 문자 처리)
+            safe_url = urllib.parse.quote(url, safe=':/?&=')
+            
+            # 요청 파라미터에 캐시 방지 쿼리 추가
+            cache_param = f"t={int(time.time())}"
+            if '?' in safe_url:
+                safe_url = f"{safe_url}&{cache_param}"
+            else:
+                safe_url = f"{safe_url}?{cache_param}"
+            
+            # UTF-8 요청 헤더 명시적으로 포함
+            custom_headers['Accept-Charset'] = 'utf-8'
+            custom_headers['Content-Type'] = 'text/html; charset=UTF-8'
+            
+            # 주요 에러 발생 원인인 압축 방식 완전 비활성화
+            session.headers.pop('Accept-Encoding', None)  # 기존 헤더 제거
+            
+            try:
+                # 데이터 압축 처리 오류 방지를 위해 stream 모드로 가져오기
+                raw_response = session.get(
+                    safe_url, 
+                    timeout=15, 
+                    allow_redirects=True,
+                    headers=custom_headers,
+                    stream=True  # 스트림 모드로 가져오기
+                )
+                
+                # 응답 내용을 UTF-8로 직접 디코딩하여 latin-1 오류 방지
+                content = ''
+                for chunk in raw_response.iter_content(chunk_size=8192, decode_unicode=False):
+                    if chunk:
+                        try:
+                            content += chunk.decode('utf-8', errors='replace')
+                        except Exception as decode_err:
+                            logger.warning(f"청크 디코딩 오류, 건너뛰기: {str(decode_err)}")
+                
+                # 가짜 응답 객체 생성
+                class FakeResponse:
+                    def __init__(self, status_code, text):
+                        self.status_code = status_code
+                        self.text = text
+                
+                response = FakeResponse(raw_response.status_code, content)
+            except Exception as stream_err:
+                logger.error(f"스트림 처리 오류, 일반 요청으로 대체: {str(stream_err)}")
+                # 스트림 모드에서 오류 발생시 일반 방식으로 시도
+                response = session.get(
+                    safe_url, 
+                    timeout=15, 
+                    allow_redirects=True,
+                    headers=custom_headers
+                )
+                # 응답 인코딩 명시적 설정 (UTF-8 강제)
+                response.encoding = 'utf-8'
             
             if response.status_code != 200:
                 logger.error(f"모바일 포스트 상세 조회 오류: {response.status_code}")
