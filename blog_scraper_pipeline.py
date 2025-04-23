@@ -83,10 +83,11 @@ def normalize_date_format(date_str):
     # 정규화 실패 시 원본 반환
     return date_str
 
-def scrape_blog_pipeline(blog_url, access_token=None):
+def scrape_blog_pipeline(blog_url, access_token=None, use_playwright=True):
     """
     단계적 블로그 스크래핑 파이프라인을 실행합니다.
     
+    0) Playwright 자동화 (OAuth 필요, 최상의 비공개 글 접근)
     1) 관리자 AJAX (OAuth 필요) - 비공개 글 포함 최상위 방법
     2) 모바일 API (OAuth 필요) - 최신 스킨 대응
     3) RSS 피드 (OAuth 필수 아님) - 공개 글만 수집 가능한 대안
@@ -98,6 +99,8 @@ def scrape_blog_pipeline(blog_url, access_token=None):
     Args:
         blog_url (str): 네이버 블로그 URL
         access_token (str, optional): OAuth 액세스 토큰
+        use_playwright (bool, optional): Playwright 자동화를 사용할지 여부. 기본값은 True.
+                                         비공개 글 접근에 가장 효과적이지만 시간이 조금 더 소요됨.
         
     Returns:
         tuple: (성공 여부, 메시지, 포스트 목록)
@@ -123,6 +126,39 @@ def scrape_blog_pipeline(blog_url, access_token=None):
         # 통합된 방식으로 logNo 목록 추출
         all_log_nos = None
         method_used = None
+        
+        # 단계 0: Playwright 웹 자동화 방식 (OAuth 사용 시 최고의 비공개 접근성)
+        if use_playwright and access_token:
+            logger.debug("단계 0: Playwright 자동화로 스크래핑 시작")
+            start_time = time.time()
+            
+            try:
+                # 웹 자동화를 통한 포스트 수집
+                from utils_browser import fetch_all_posts_with_playwright
+                
+                # 쿠키 문자열 생성 (auth_cookies 딕셔너리에서)
+                cookie_str = ""
+                if auth_cookies:
+                    cookie_str = "; ".join([f"{key}={value}" for key, value in auth_cookies.items()])
+                    logger.debug(f"인증 쿠키 문자열 생성: {len(cookie_str)} 바이트")
+                
+                # Playwright로 직접 포스트 수집
+                logger.debug(f"Playwright로 블로그 스크래핑 시작: {blog_id}")
+                playwright_posts = fetch_all_posts_with_playwright(
+                    blog_id=blog_id, 
+                    cookie_str=cookie_str, 
+                    access_token=access_token
+                )
+                
+                if playwright_posts:
+                    duration = time.time() - start_time
+                    logger.debug(f"Playwright 성공: {len(playwright_posts)}개 포스트, {duration:.2f}초 소요")
+                    return True, f"Playwright로 {len(playwright_posts)}개의 포스트를 가져왔습니다.", playwright_posts
+                else:
+                    logger.warning("Playwright 방식 실패, 다음 방법으로 진행")
+            except Exception as pw_error:
+                logger.error(f"Playwright 스크래핑 오류: {str(pw_error)}")
+                logger.debug("대체 방법으로 진행합니다")
         
         # 스크래핑 메소드 순서 변경: 모바일 API를 먼저 시도합니다 (비공개 글 접근성 향상)
         

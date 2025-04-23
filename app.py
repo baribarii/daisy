@@ -192,11 +192,15 @@ def oauth_submit_blog():
         
         # 강화된 스크래핑 파이프라인 사용
         try:
-            logger.debug("강화된 블로그 스크래핑 파이프라인 시작")
+            logger.debug("강화된 블로그 스크래핑 파이프라인 시작 (Playwright 활성화)")
             from blog_scraper_pipeline import scrape_blog_pipeline
             
-            # 파이프라인 실행
-            success, message, posts = scrape_blog_pipeline(blog_url, session['access_token'])
+            # 파이프라인 실행 - Playwright 자동화 활성화 (비공개 글 접근 강화)
+            success, message, posts = scrape_blog_pipeline(
+                blog_url=blog_url, 
+                access_token=session['access_token'], 
+                use_playwright=True
+            )
             
             if not success or not posts:
                 raise ValueError(message)
