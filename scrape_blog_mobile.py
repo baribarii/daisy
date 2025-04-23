@@ -404,7 +404,26 @@ def get_post_detail(session, blog_id, log_no):
             # 인코딩 문제 방지를 위해 여러 개선 옵션 적용
             import urllib.parse
             
+            # 기존 헤더 대신 완전히 새로운 헤더 세트를 사용
+            custom_headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Accept-Charset': 'utf-8',
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'same-origin',
+                'Sec-Fetch-User': '?1',
+                'Upgrade-Insecure-Requests': '1',
+                'Connection': 'keep-alive'
+            }
+            
             # URL을 안전하게 인코딩 (한글 포함 문자 처리)
+            # 네이버 모바일은 인코딩이 되지 않은 URL을 선호하는 경우도 있음
+            # 원본 URL과 인코딩된 URL 모두 시도
+            original_url = url
             safe_url = urllib.parse.quote(url, safe=':/?&=')
             
             # 요청 파라미터에 캐시 방지 쿼리 추가
@@ -413,34 +432,65 @@ def get_post_detail(session, blog_id, log_no):
                 safe_url = f"{safe_url}&{cache_param}"
             else:
                 safe_url = f"{safe_url}?{cache_param}"
+                
+            # 원본 URL에도 캐시 방지 쿼리 추가
+            if '?' in original_url:
+                original_url = f"{original_url}&{cache_param}"
+            else:
+                original_url = f"{original_url}?{cache_param}"
             
-            # UTF-8 요청 헤더 명시적으로 포함
-            custom_headers['Accept-Charset'] = 'utf-8'
-            custom_headers['Content-Type'] = 'text/html; charset=UTF-8'
-            
-            # 주요 에러 발생 원인인 압축 방식 완전 비활성화
-            session.headers.pop('Accept-Encoding', None)  # 기존 헤더 제거
+            # 모든 압축 비활성화
+            session.headers.pop('Accept-Encoding', None)
             
             try:
-                # 데이터 압축 처리 오류 방지를 위해 stream 모드로 가져오기
-                raw_response = session.get(
-                    safe_url, 
-                    timeout=15, 
-                    allow_redirects=True,
-                    headers=custom_headers,
-                    stream=True  # 스트림 모드로 가져오기
-                )
+                # 인코딩된 URL로 먼저 시도
+                try:
+                    raw_response = session.get(
+                        safe_url, 
+                        timeout=15, 
+                        allow_redirects=True,
+                        headers=custom_headers,
+                        stream=True  # 스트림 모드로 가져오기
+                    )
+                except Exception as safe_url_err:
+                    logger.warning(f"인코딩된 URL 요청 실패, 원본 URL 시도: {str(safe_url_err)}")
+                    # 인코딩된 URL 실패 시 원본 URL 시도
+                    raw_response = session.get(
+                        original_url, 
+                        timeout=15, 
+                        allow_redirects=True,
+                        headers=custom_headers,
+                        stream=True
+                    )
                 
-                # 응답 내용을 UTF-8로 직접 디코딩하여 latin-1 오류 방지
+                # 응답 내용을 다양한 방식으로 디코딩 시도
                 content = ''
+                
+                # 1. 바이너리 방식으로 모든 내용을 가져옴
+                all_content = b""
                 for chunk in raw_response.iter_content(chunk_size=8192, decode_unicode=False):
                     if chunk:
-                        try:
-                            content += chunk.decode('utf-8', errors='replace')
-                        except Exception as decode_err:
-                            logger.warning(f"청크 디코딩 오류, 건너뛰기: {str(decode_err)}")
+                        all_content += chunk
                 
-                # 가짜 응답 객체 생성
+                # 2. 다양한 인코딩 방식 순차적으로 시도
+                encodings_to_try = ['utf-8', 'euc-kr', 'cp949', 'iso-8859-1', 'latin-1']
+                decoded = False
+                
+                for encoding in encodings_to_try:
+                    try:
+                        content = all_content.decode(encoding)
+                        logger.debug(f"인코딩 '{encoding}'으로 성공적으로 디코딩")
+                        decoded = True
+                        break
+                    except UnicodeDecodeError:
+                        continue
+                
+                # 3. 모든 인코딩이 실패한 경우 errors='replace'로 강제 변환
+                if not decoded:
+                    logger.warning("모든 인코딩 방식 실패, 'replace' 옵션으로 디코딩")
+                    content = all_content.decode('utf-8', errors='replace')
+                
+                # 4. 가짜 응답 객체 생성
                 class FakeResponse:
                     def __init__(self, status_code, text):
                         self.status_code = status_code
@@ -449,13 +499,36 @@ def get_post_detail(session, blog_id, log_no):
                 response = FakeResponse(raw_response.status_code, content)
             except Exception as stream_err:
                 logger.error(f"스트림 처리 오류, 일반 요청으로 대체: {str(stream_err)}")
-                # 스트림 모드에서 오류 발생시 일반 방식으로 시도
-                response = session.get(
-                    safe_url, 
-                    timeout=15, 
-                    allow_redirects=True,
-                    headers=custom_headers
-                )
+                # 스트림 모드에서 오류 발생 시 일반 방식 시도
+                try:
+                    # 인코딩된 URL로 재시도
+                    response = session.get(
+                        safe_url, 
+                        timeout=15, 
+                        allow_redirects=True,
+                        headers=custom_headers
+                    )
+                except Exception as safe_retry_err:
+                    logger.warning(f"인코딩된 URL 일반 요청 실패, 원본 URL 시도: {str(safe_retry_err)}")
+                    # 원본 URL로 시도
+                    response = session.get(
+                        original_url, 
+                        timeout=15, 
+                        allow_redirects=True,
+                        headers=custom_headers
+                    )
+                
+                # PC 웹 버전으로 시도 (모바일 버전이 실패하는 경우)
+                if response.status_code != 200:
+                    logger.warning(f"모바일 버전 접근 실패({response.status_code}), PC 웹 버전 시도")
+                    pc_url = f"https://blog.naver.com/{blog_id}/{log_no}"
+                    response = session.get(
+                        pc_url,
+                        timeout=15,
+                        allow_redirects=True,
+                        headers=custom_headers
+                    )
+                
                 # 응답 인코딩 명시적 설정 (UTF-8 강제)
                 response.encoding = 'utf-8'
             
