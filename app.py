@@ -331,14 +331,16 @@ def analyze_blog(blog_id):
         logger.debug(f"총 {post_count}개의 포스트를 분석합니다.")
         
         # 최신순으로 정렬(내림차순) - 최근 작성된 글이 먼저 분석되도록 함
-        # 정렬 우선순위: 1) 생성일, 2) 작성일, 3) logNo
+        # 중요: logNo 번호만으로 정렬 (네이버 블로그는 최신글이 높은 번호를 가짐)
         sorted_posts = sorted(posts, 
-                             key=lambda p: (
-                                 p.created_at if hasattr(p, 'created_at') and p.created_at else datetime.now(),
-                                 p.date if p.date else "",
-                                 int(p.logNo) if hasattr(p, 'logNo') and p.logNo and p.logNo.isdigit() else 0
-                             ),
+                             key=lambda p: int(p.logNo) if hasattr(p, 'logNo') and p.logNo and p.logNo.isdigit() else 0,
                              reverse=True)
+        
+        # 정렬 결과 로그 출력
+        logger.debug("정렬된 포스트 logNo 순서:")
+        for p in sorted_posts[:5]:  # 처음 5개만 로그로 확인
+            log_no = p.logNo if hasattr(p, 'logNo') and p.logNo else "없음"
+            logger.debug(f"logNo: {log_no}, 날짜: {p.date}, 제목: {p.title[:10]}...")
         
         # 포스트 메타데이터와 함께 콘텐츠 구성
         for i, post in enumerate(sorted_posts, 1):
@@ -416,11 +418,13 @@ def view_report(report_id):
         blog = Blog.query.get_or_404(report.blog_id)
         
         # Get the blog posts (최대 30개까지 표시 - 최신 순으로 정렬)
-        # 가장 최근 작성된 글 우선 - logNo가 높을수록 최신글(DESC)
-        posts = BlogPost.query.filter_by(blog_id=report.blog_id).order_by(
-            BlogPost.created_at.desc(),  # 먼저 생성일 기준 내림차순
-            BlogPost.date.desc(),        # 그 다음 작성일 기준 내림차순
-            BlogPost.logNo.desc()        # 마지막으로 logNo 기준 내림차순 (최신글이 높은 숫자)
+        # 로직을 심플하게 유지: 오직 logNo만 기준으로 정렬 (최신글이 높은 번호)
+        # SQL 인젝션 방지를 위해 text()와 bindparam 사용
+        from sqlalchemy import text
+        posts = db.session.query(BlogPost).filter(
+            BlogPost.blog_id == report.blog_id
+        ).order_by(
+            text('CAST("logNo" as BIGINT) DESC')
         ).limit(30).all()
         
         # 세션에서 큰 데이터 저장 안 함 - 디스플레이용 정보만 메모리에서 처리
