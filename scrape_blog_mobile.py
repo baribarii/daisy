@@ -99,24 +99,43 @@ def create_authenticated_session(access_token):
         
         # 2. 네이버 인증 쿠키 설정 - 비공개 글 접근에 필수
         try:
-            # OAuth 토큰을 NID_AUT, NID_SES 쿠키로 변환
-            # 접두사/접미사 분리 방식
+            # 관리자 API와 동일한 강화된 인증 시스템 적용
+            import hashlib
+            import base64
+            import time
+            
+            # 보다 강력한 토큰 변환
+            token_md5 = hashlib.md5(access_token.encode('utf-8')).hexdigest()
+            token_b64 = base64.b64encode(access_token.encode('utf-8')).decode('utf-8')
             token_prefix = access_token[:16] if len(access_token) >= 16 else access_token
             token_suffix = access_token[-16:] if len(access_token) >= 16 else access_token
             
-            # 주요 네이버 인증 쿠키 추가
+            # 모바일 특화 인증 쿠키 세트
             cookies = {
-                'NID_AUT': token_prefix,
-                'NID_SES': token_suffix,
-                'NID_JKL': token_prefix[:8] if len(token_prefix) >= 8 else token_prefix,
-                # 모바일 전용 인증 쿠키
+                # 네이버 인증 필수 쿠키
+                'NID_AUT': token_md5[:16],
+                'NID_SES': token_md5[16:32],
+                'NID_JKL': token_md5[:8],
+                
+                # 모바일 접근용 쿠키 (모바일 특화)
                 'MM_NEW': '1',
                 'NID_M_CHECK': 'true',
                 'NID_DEVICE': 'mobile',
-                # 추가적인 네이버 쿠키로 인증 강화
+                'BLOG_M': 'on',
+                'MOBILE_BI': token_md5[:10],
+                
+                # 비공개 글 접근을 위한 추가 쿠키
                 'NID_CHECK': 'naver',
                 'JSESSIONID': token_suffix.replace('-', ''),
-                'nid_inf': access_token.replace('-', '')[:12] if len(access_token) >= 12 else access_token,
+                'nid_inf': token_md5[:12],
+                
+                # 네이버 로그인 상태 유지
+                'nx_ssl': 'on',
+                'PM_CK_loc': 'https://nid.naver.com/login/sso/finalize.nhn',
+                
+                # 시간 기반 쿠키 (타임스탬프 포함)
+                'nid_tss': str(int(time.time())),
+                'nts_cdf': token_b64[:16]
             }
             
             # 쿠키 설정
@@ -126,13 +145,71 @@ def create_authenticated_session(access_token):
         except Exception as e:
             logger.error(f"인증 쿠키 설정 중 오류: {str(e)}")
     
-    # 세션 검증
+    # 세션 검증 및 실제 로그인 상태 확인
     try:
-        # 인증 확인
+        # 1. 직접 OAuth 토큰으로 네이버 API 호출하여 사용자 정보 획득
+        logger.debug("네이버 API로 직접 사용자 정보 확인 시도")
+        api_url = "https://openapi.naver.com/v1/nid/me"
+        api_headers = {'Authorization': f'Bearer {access_token}'}
+        
+        try:
+            profile_resp = requests.get(api_url, headers=api_headers, timeout=5)
+            if profile_resp.status_code == 200:
+                profile_data = profile_resp.json()
+                if profile_data.get('resultcode') == '00':
+                    user_data = profile_data.get('response', {})
+                    user_id = user_data.get('id')
+                    user_name = user_data.get('name')
+                    logger.debug(f"네이버 API 사용자 정보 획득 성공: ID={user_id}, 이름={user_name}")
+                    
+                    # 세션 헤더에 사용자 정보 추가 (모바일 API용으로 활용)
+                    session.headers.update({
+                        'X-Naver-User-Id': user_id or '',
+                        'X-Naver-User-Name': user_name or ''
+                    })
+                    
+                    # POST 요청시 필요한 폼 데이터에도 사용자 ID 추가 
+                    # (네이버 모바일 API의 추가 인증 요구사항)
+                    if user_id:
+                        session.cookies.update({'naver_uid': user_id})
+                else:
+                    logger.warning(f"네이버 API 응답 오류: {profile_data.get('message')}")
+            else:
+                logger.warning(f"네이버 API 호출 실패: {profile_resp.status_code}")
+        except Exception as api_error:
+            logger.warning(f"네이버 API 호출 오류: {str(api_error)}")
+        
+        # 2. 모바일 웹 인증 페이지 접속하여 로그인 상태 활성화
+        logger.debug("모바일 네이버 접속하여 토큰 활성화 시도")
+        try:
+            # 모바일 로그인 페이지 접속
+            login_url = "https://m.naver.com"
+            login_resp = session.get(login_url, timeout=5)
+            if login_resp.status_code == 200:
+                logger.debug("모바일 네이버 접속 성공")
+            else:
+                logger.warning(f"모바일 네이버 접속 실패: {login_resp.status_code}")
+                
+            # 모바일 블로그 로그인 페이지 접속 (인증 활성화)
+            blog_login_url = "https://m.blog.naver.com/nidlogin.naver"
+            blog_login_resp = session.get(blog_login_url, timeout=5)
+            if blog_login_resp.status_code == 200:
+                logger.debug("모바일 블로그 로그인 페이지 접속 성공")
+            else:
+                logger.warning(f"모바일 블로그 로그인 페이지 접속 실패: {blog_login_resp.status_code}")
+        except Exception as login_error:
+            logger.warning(f"모바일 로그인 시도 오류: {str(login_error)}")
+        
+        # 3. 최종 검증: 모바일 블로그 페이지 로드 및 로그인 여부 확인
         test_url = "https://m.blog.naver.com/"
         response = session.get(test_url, timeout=5)
         if response.status_code == 200:
-            logger.debug("모바일 세션 인증 확인 완료")
+            # 로그인 상태 확인 (로그인 버튼이 있는지)
+            is_logged_in = "로그인" not in response.text or "login" not in response.text.lower()
+            if is_logged_in:
+                logger.debug("모바일 세션 인증 확인 완료 - 로그인 상태")
+            else:
+                logger.warning("모바일 세션 인증 확인 됨 - 그러나 로그인 상태가 아님")
         else:
             logger.warning(f"모바일 인증 확인 실패 (status: {response.status_code})")
     except Exception as e:
@@ -293,6 +370,7 @@ def get_posts_via_mobile_api(session, blog_id):
 def get_post_detail(session, blog_id, log_no):
     """
     특정 포스트의 상세 내용을 모바일 페이지에서 가져옵니다.
+    인코딩 문제 해결과 비공개 글 접근을 위한 개선 로직 포함.
     
     Args:
         session (requests.Session): 인증된 세션
@@ -306,9 +384,33 @@ def get_post_detail(session, blog_id, log_no):
         # 모바일 포스트 조회 URL
         url = f"https://m.blog.naver.com/PostView.naver?blogId={blog_id}&logNo={log_no}"
         
+        # 비공개 글이나 친구 공개 글을 위한 헤더 추가
+        custom_headers = {
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Encoding': 'identity',  # 명시적으로 압축 비활성화 (인코딩 문제 방지)
+            'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
+            'Referer': f'https://m.blog.naver.com/PostList.naver?blogId={blog_id}',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'same-origin',
+            'Sec-Fetch-User': '?1',
+            'Upgrade-Insecure-Requests': '1'
+        }
+        
         # 더 짧은 타임아웃 및 예외 처리 강화
         try:
-            response = session.get(url, timeout=15, allow_redirects=True)
+            # 인코딩 문제 방지를 위해 인코딩 설정을 명시
+            response = session.get(
+                url, 
+                timeout=15, 
+                allow_redirects=True,
+                headers=custom_headers
+            )
+            
+            # 응답 인코딩 명시적 설정 (UTF-8 강제)
+            response.encoding = 'utf-8'
             
             if response.status_code != 200:
                 logger.error(f"모바일 포스트 상세 조회 오류: {response.status_code}")

@@ -257,6 +257,27 @@ def scrape_blog_pipeline(blog_url, access_token=None):
                     if 'url' not in post_detail:
                         post_detail['url'] = f"https://blog.naver.com/{blog_id}/{log_no}"
                     
+                    # 비공개 글 감지 개선: 제목이나 내용에 특정 키워드가 있으면 비공개 글로 처리
+                    title = post_detail.get('title', '제목 없음')
+                    content = post_detail.get('content', '')
+                    is_private = post_detail.get('is_private', False)
+                    
+                    # 자동 비공개 글 감지 (추가 검사)
+                    private_keywords = ["접근 실패", "접근 권한이 없", "비공개", "권한이 없습니다", "비밀글"]
+                    for keyword in private_keywords:
+                        if keyword in title or (content and keyword in content[:100]):  # 제목이나 내용 앞부분에서 검사
+                            is_private = True
+                            logger.debug(f"비공개 글 감지: 키워드 '{keyword}' 발견")
+                            break
+                    
+                    # 매우 짧은 내용이면 비공개일 가능성 높음 (예외적 상황 시)
+                    if not is_private and content and len(content.strip()) < 50:
+                        is_private = True
+                        logger.debug(f"비공개 글 감지: 짧은 내용 (길이 {len(content.strip())})")
+                    
+                    # 업데이트된 is_private 상태 반영
+                    post_detail['is_private'] = is_private
+                    
                     # 날짜 형식 정규화 (YYYY-MM-DD)
                     if 'date' in post_detail and post_detail['date']:
                         post_detail['date'] = normalize_date_format(post_detail['date'])
