@@ -330,8 +330,11 @@ def analyze_blog(blog_id):
         post_count = len(posts)
         logger.debug(f"총 {post_count}개의 포스트를 분석합니다.")
         
-        # 날짜 순으로 정렬하여 시간에 따른 변화 분석 가능하도록 함
-        sorted_posts = sorted(posts, key=lambda p: p.created_at if hasattr(p, 'created_at') and p.created_at else p.date if p.date else "")
+        # 최신순으로 정렬(내림차순) - 최근 작성된 글이 먼저 분석되도록 함
+        sorted_posts = sorted(posts, 
+                             key=lambda p: (p.created_at if hasattr(p, 'created_at') and p.created_at else datetime.now(),
+                                           p.date if p.date else ""),
+                             reverse=True)
         
         # 포스트 메타데이터와 함께 콘텐츠 구성
         for i, post in enumerate(sorted_posts, 1):
@@ -409,7 +412,7 @@ def view_report(report_id):
         blog = Blog.query.get_or_404(report.blog_id)
         
         # Get the blog posts (최대 30개까지 표시 - 최신 순으로 정렬)
-        posts = BlogPost.query.filter_by(blog_id=report.blog_id).order_by(BlogPost.date.desc()).limit(30).all()
+        posts = BlogPost.query.filter_by(blog_id=report.blog_id).order_by(BlogPost.created_at.desc(), BlogPost.date.desc()).limit(30).all()
         
         # 세션에서 큰 데이터 저장 안 함 - 디스플레이용 정보만 메모리에서 처리
         post_views = []

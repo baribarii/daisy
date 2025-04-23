@@ -216,6 +216,8 @@ def scrape_blog_pipeline(blog_url, access_token=None):
         logger.debug(f"{method_used} 방식으로 얻은 {len(all_log_nos)}개 logNo로 상세 내용 수집 시작")
         
         # 최대 10개로 제한 (기존 20개에서 추가 축소하여 타임아웃 방지)
+        # logNo 형식이 숫자이므로 역순 정렬 - 최신글이 일반적으로 큰 숫자
+        all_log_nos = sorted(all_log_nos, reverse=True)
         if len(all_log_nos) > 10:
             logger.debug(f"logNo 수 제한: {len(all_log_nos)}개 -> 10개")
             all_log_nos = all_log_nos[:10]
