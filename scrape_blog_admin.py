@@ -98,20 +98,40 @@ def create_authenticated_session(access_token):
         
         # 2. 네이버 인증 쿠키 설정 - 비공개 글 접근에 필수
         try:
-            # OAuth 토큰을 NID_AUT, NID_SES 쿠키로 변환
-            # 접두사/접미사 분리 방식
+            # 네이버 토큰으로부터 여러 다양한 쿠키 형식 시도
+            import hashlib
+            import base64
+            import time
+            
+            # 보다 강력한 토큰 변환
+            token_md5 = hashlib.md5(access_token.encode('utf-8')).hexdigest()
+            token_b64 = base64.b64encode(access_token.encode('utf-8')).decode('utf-8')
             token_prefix = access_token[:16] if len(access_token) >= 16 else access_token
             token_suffix = access_token[-16:] if len(access_token) >= 16 else access_token
             
-            # 주요 네이버 인증 쿠키 추가
+            # 다양한 네이버 인증 쿠키 추가 - 여러 형식 시도
             cookies = {
-                'NID_AUT': token_prefix,
-                'NID_SES': token_suffix,
-                'NID_JKL': token_prefix[:8] if len(token_prefix) >= 8 else token_prefix,
-                # 추가적인 네이버 쿠키로 인증 강화
+                # 네이버 인증 필수 쿠키
+                'NID_AUT': token_md5[:16],
+                'NID_SES': token_md5[16:32],
+                'NID_JKL': token_md5[:8],
+                
+                # 비공개 글 접근을 위한 추가 쿠키
                 'NID_CHECK': 'naver',
                 'JSESSIONID': token_suffix.replace('-', ''),
-                'nid_inf': access_token.replace('-', '')[:12] if len(access_token) >= 12 else access_token,
+                'nid_inf': token_md5[:12],
+                
+                # 모바일 접근용 쿠키
+                'MM_NEW': 'Y',
+                'NFS': token_md5[:8],
+                
+                # 네이버 로그인 상태 유지
+                'nx_ssl': 'on',
+                'PM_CK_loc': 'https://nid.naver.com/login/sso/finalize.nhn',
+                
+                # 시간 기반 쿠키 (타임스탬프 포함)
+                'nid_tss': str(int(time.time())),
+                'nts_cdf': token_b64[:16]
             }
             
             # 쿠키 설정
@@ -121,13 +141,74 @@ def create_authenticated_session(access_token):
         except Exception as e:
             logger.error(f"인증 쿠키 설정 중 오류: {str(e)}")
     
-    # 세션 검증
+    # 세션 검증 및 실제 로그인 상태 확인
     try:
-        # 인증 확인
+        # 1. 직접 OAuth 토큰으로 네이버 API 호출하여 사용자 정보 획득
+        logger.debug("네이버 API로 직접 사용자 정보 확인 시도")
+        api_url = "https://openapi.naver.com/v1/nid/me"
+        api_headers = {'Authorization': f'Bearer {access_token}'}
+        
+        try:
+            profile_resp = requests.get(api_url, headers=api_headers, timeout=5)
+            if profile_resp.status_code == 200:
+                profile_data = profile_resp.json()
+                if profile_data.get('resultcode') == '00':
+                    user_data = profile_data.get('response', {})
+                    user_id = user_data.get('id')
+                    user_name = user_data.get('name')
+                    user_email = user_data.get('email')
+                    logger.debug(f"네이버 API 사용자 정보 획득 성공: ID={user_id}, 이름={user_name}")
+                    
+                    # 세션 헤더에 사용자 정보 추가
+                    session.headers.update({
+                        'X-Naver-User-Id': user_id or '',
+                        'X-Naver-User-Name': user_name or ''
+                    })
+                else:
+                    logger.warning(f"네이버 API 응답 오류: {profile_data.get('message')}")
+            else:
+                logger.warning(f"네이버 API 호출 실패: {profile_resp.status_code}")
+        except Exception as api_error:
+            logger.warning(f"네이버 API 호출 오류: {str(api_error)}")
+        
+        # 2. 네이버 로그인 페이지 접속 -> 토큰 활성화
+        logger.debug("네이버 로그인 페이지 접속하여 토큰 활성화 시도")
+        try:
+            login_url = "https://nid.naver.com/nidlogin.login"
+            login_resp = session.get(login_url, timeout=5)
+            if login_resp.status_code == 200:
+                logger.debug("로그인 페이지 접속 성공")
+                
+                # csrf_token 추출 시도
+                import re
+                csrf_match = re.search(r'name="csrf_token"\s+value="([^"]+)"', login_resp.text)
+                if csrf_match:
+                    csrf_token = csrf_match.group(1)
+                    logger.debug(f"CSRF 토큰 추출: {csrf_token[:8]}...")
+                    
+                    # OAuth 토큰으로 로그인 시도
+                    login_data = {
+                        'csrf_token': csrf_token,
+                        'token_key': access_token[:16],
+                        'logintype': 'oauth2',
+                        'svctype': '0'
+                    }
+                    session.post(login_url, data=login_data, timeout=5)
+            else:
+                logger.warning(f"로그인 페이지 접속 실패: {login_resp.status_code}")
+        except Exception as login_error:
+            logger.warning(f"로그인 시도 오류: {str(login_error)}")
+        
+        # 3. 최종 검증: 블로그 페이지 로드 및 로그인 여부 확인
         test_url = "https://blog.naver.com/"
         response = session.get(test_url, timeout=5)
         if response.status_code == 200:
-            logger.debug("세션 인증 확인 완료")
+            # 로그인 상태 확인 (로그인 버튼이 있는지)
+            is_logged_in = "로그인" not in response.text or "login" not in response.text.lower()
+            if is_logged_in:
+                logger.debug("세션 인증 확인 완료 - 로그인 상태")
+            else:
+                logger.warning("세션 인증 확인 됨 - 그러나 로그인 상태가 아님")
         else:
             logger.warning(f"인증 확인 실패 (status: {response.status_code})")
     except Exception as e:
